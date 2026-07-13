@@ -103,6 +103,7 @@
   <h1>☁️ Consola en la Nube</h1>
   <span class="estado" id="estadoConexion">Sin conectar</span>
   <span style="flex:1"></span>
+  <a class="secundario" id="btnDashboard" href="panel.html" style="display:none; text-decoration:none">📊 Dashboard</a>
   <button class="secundario" id="btnActualizar" style="display:none">⟳ Actualizar</button>
   <button class="secundario" id="btnConfig" style="display:none">⚙️</button>
   <button class="secundario" id="btnSalir" style="display:none">Cerrar sesión</button>
@@ -571,6 +572,7 @@ let refrescoIniciado = false;
 async function iniciarUI() {
   $("pantallaConexion").style.display = "none";
   $("aplicacion").style.display = "block";
+  $("btnDashboard").style.display = "inline-block";
   $("btnActualizar").style.display = "inline-block";
   $("btnConfig").style.display = "inline-block";
   $("btnSalir").style.display = "inline-block";
