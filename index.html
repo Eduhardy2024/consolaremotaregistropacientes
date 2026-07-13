@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consola en la Nube — Registro de Pacientes</title>
+<style>
+  :root {
+    --azul: #2563eb; --azul-suave: #eff6ff; --verde: #16a34a; --rojo: #dc2626;
+    --naranja: #ea580c; --gris: #6b7280; --fondo: #f8fafc; --borde: #e2e8f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { background: var(--fondo); color: #0f172a; }
+  header { background: white; border-bottom: 1px solid var(--borde); padding: 14px 24px;
+           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; }
+  header .estado { font-size: 13px; color: var(--gris); }
+  .contenedor { max-width: 980px; margin: 0 auto; padding: 20px; }
+  .pestanas { display: flex; gap: 8px; margin-bottom: 16px; }
+  .pestanas button { padding: 9px 22px; border: 1px solid var(--borde); background: white;
+                     border-radius: 10px; font-size: 14px; cursor: pointer; }
+  .pestanas button.activa { background: var(--azul); color: white; border-color: var(--azul); font-weight: 600; }
+  .tarjeta { background: white; border: 1px solid var(--borde); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+  .fila-controles { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--azul); border-color: transparent; }
+  button.primario { background: var(--azul); color: white; border: none; padding: 9px 18px;
+                    border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.secundario { background: white; border: 1px solid var(--borde); padding: 8px 14px;
+                      border-radius: 8px; font-size: 14px; cursor: pointer; }
+  button.peligro { background: none; border: none; color: var(--rojo); cursor: pointer; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase; color: var(--gris);
+       padding: 8px 10px; border-bottom: 2px solid var(--borde); }
+  td { padding: 10px; border-bottom: 1px solid var(--borde); font-size: 14px; vertical-align: top; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+  .Pendiente { background: #fff7ed; color: var(--naranja); }
+  .Asistió { background: #f0fdf4; color: var(--verde); }
+  .No.asistió, .NoAsistio { background: #fef2f2; color: var(--rojo); }
+  .Cancelado { background: #f1f5f9; color: var(--gris); }
+  .modal-fondo { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none;
+                 align-items: center; justify-content: center; z-index: 50; }
+  .modal-fondo.visible { display: flex; }
+  .modal { background: white; border-radius: 14px; padding: 22px; width: 520px; max-width: 94vw;
+           max-height: 90vh; overflow-y: auto; }
+  .modal h2 { font-size: 17px; margin-bottom: 14px; }
+  .campo { margin-bottom: 10px; }
+  .campo label { display: block; font-size: 12px; font-weight: 600; color: var(--gris);
+                 text-transform: uppercase; margin-bottom: 3px; }
+  .campo input, .campo select, .campo textarea { width: 100%; }
+  .dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .acciones-modal { display: flex; justify-content: space-between; margin-top: 16px; }
+  .aviso { padding: 12px 16px; border-radius: 10px; font-size: 14px; margin-bottom: 14px; }
+  .aviso.info { background: var(--azul-suave); color: #1e40af; }
+  .aviso.error { background: #fef2f2; color: var(--rojo); }
+  .vacio { text-align: center; color: var(--gris); padding: 30px; font-size: 14px; }
+  .modo-btn { border: none; background: white; padding: 7px 14px; font-size: 13px; cursor: pointer; color: var(--gris); }
+  .modo-btn.activo { background: var(--azul); color: white; font-weight: 600; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-dow { text-align: center; font-size: 11px; color: var(--gris); padding: 4px 0; }
+  .cal-dia { min-height: 74px; border: 1px solid var(--borde); border-radius: 8px; padding: 4px 6px; cursor: pointer; background: white; }
+  .cal-dia:hover { background: var(--azul-suave); }
+  .cal-dia.hoy { border-color: var(--azul); }
+  .cal-dia.otro { background: #fafbfc; color: #cbd5e1; }
+  .cal-num { font-size: 13px; font-weight: 600; }
+  .cal-cita { font-size: 10px; background: #eff6ff; border-radius: 3px; padding: 1px 3px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sem-col { border: 1px solid var(--borde); border-radius: 8px; padding: 6px; min-height: 120px; }
+  .sem-cita { font-size: 11px; background: #eff6ff; border-radius: 4px; padding: 3px 5px; margin-bottom: 4px; cursor: pointer; }
+  #pantallaConexion { text-align: center; padding: 60px 20px; }
+  #pantallaConexion h2 { margin-bottom: 10px; }
+  #pantallaConexion p { color: var(--gris); margin-bottom: 20px; max-width: 520px; margin-left: auto; margin-right: auto; }
+  #listaCitas, #listaPacientes, #histLista { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .sv-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0 12px; }
+
+  /* ---------- Ajustes para iPad / iPhone (pantallas chicas y táctiles) ---------- */
+  @media (max-width: 700px) {
+    .contenedor { padding: 10px; }
+    header { padding: 10px 12px; gap: 8px; }
+    header h1 { font-size: 16px; }
+    /* 16px evita que iOS haga zoom automático al tocar un campo */
+    input, select, textarea { font-size: 16px; }
+    button.primario, button.secundario, .pestanas button { font-size: 15px; }
+    .pestanas button { flex: 1; padding: 12px 0; }
+    .fila-controles { gap: 6px; }
+    th, td { padding: 8px 6px; }
+    .cal-dia { min-height: 52px; padding: 2px 4px; }
+    /* Los formularios se abren como hoja desde abajo, estilo iOS */
+    .modal-fondo.visible { align-items: flex-end; }
+    .modal { width: 100vw !important; max-width: 100vw; max-height: 92vh;
+             border-radius: 16px 16px 0 0;
+             padding: 16px 14px calc(18px + env(safe-area-inset-bottom)); }
+    .sv-grid { grid-template-columns: repeat(2, 1fr); }
+    /* El encabezado de la historia clínica se apila para que quepan los botones */
+    #modalHistoria .modal > div:first-child { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>☁️ Consola en la Nube</h1>
+  <span class="estado" id="estadoConexion">Sin conectar</span>
+  <span style="flex:1"></span>
+  <button class="secundario" id="btnActualizar" style="display:none">⟳ Actualizar</button>
+  <button class="secundario" id="btnConfig" style="display:none">⚙️</button>
+  <button class="secundario" id="btnSalir" style="display:none">Cerrar sesión</button>
+</header>
+
+<div class="contenedor">
+
+  <div id="pantallaConexion" class="tarjeta">
+    <h2>Consola en la Nube</h2>
+
+    <div id="bloqueLogin" style="display:none">
+      <p>Trabaja con la agenda y los pacientes <b>desde cualquier lugar</b>, directamente
+         sobre el OneDrive del consultorio. Inicia sesión con la <b>cuenta Microsoft</b>
+         dueña de la carpeta. Los datos viajan cifrados entre este dispositivo y Microsoft;
+         no pasan por ningún otro servidor.</p>
+      <button class="primario" id="btnLogin">Iniciar sesión con Microsoft</button>
+      <div style="margin-top:12px">
+        <button class="secundario" id="btnIrConfig">⚙️ Cambiar configuración</button>
+      </div>
+    </div>
+
+    <div id="bloqueConfig" style="display:none">
+      <p>Configuración inicial — solo se hace una vez en cada dispositivo; los valores quedan
+         guardados aquí. El ID se obtiene siguiendo la <b>"Guía - Consola en la Nube.md"</b>.</p>
+      <div style="max-width:480px; margin:0 auto; text-align:left">
+        <div class="campo">
+          <label>ID de aplicación (cliente) — de portal.azure.com</label>
+          <input id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+        </div>
+        <div class="campo">
+          <label>Ruta de la carpeta Datos dentro de OneDrive</label>
+          <input id="cfgRuta" placeholder="REGISTRO PACIENTES V2/Datos">
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <button class="primario" id="btnGuardarConfig">Guardar y conectar</button>
+      </div>
+    </div>
+
+    <p id="msgErrorNube" style="color:var(--rojo); margin-top:14px; display:none"></p>
+  </div>
+
+  <div id="aplicacion" style="display:none">
+    <div class="pestanas">
+      <button id="tabAgenda" class="activa">📅 Agenda</button>
+      <button id="tabPacientes">👥 Pacientes</button>
+    </div>
+
+    <!-- ===================== AGENDA ===================== -->
+    <div id="vistaAgenda" class="tarjeta">
+      <div class="fila-controles">
+        <div style="display:inline-flex; border:1px solid var(--borde); border-radius:8px; overflow:hidden">
+          <button class="modo-btn" id="modoMes" onclick="setModo('mes')">Mes</button>
+          <button class="modo-btn" id="modoSemana" onclick="setModo('semana')">Semana</button>
+          <button class="modo-btn activo" id="modoDia" onclick="setModo('dia')">Día</button>
+        </div>
+        <button class="secundario" onclick="moverAgenda(-1)">←</button>
+        <input type="date" id="fechaAgenda" onchange="dibujarAgenda()">
+        <button class="secundario" onclick="moverAgenda(1)">→</button>
+        <button class="secundario" onclick="irHoy()">Hoy</button>
+        <span id="tituloAgenda" style="font-weight:700; margin-left:6px"></span>
+        <span style="flex:1"></span>
+        <button class="primario" onclick="abrirModalCita()">+ Nueva cita</button>
+      </div>
+      <div id="listaCitas"></div>
+    </div>
+
+    <!-- ===================== PACIENTES ===================== -->
+    <div id="vistaPacientes" class="tarjeta" style="display:none">
+      <div class="fila-controles">
+        <input type="search" id="buscarPaciente" placeholder="Buscar por nombre, RFC o teléfono…"
+               style="flex:1" oninput="dibujarPacientes()">
+        <button class="primario" onclick="abrirModalPaciente()">+ Nuevo paciente</button>
+      </div>
+      <div class="fila-controles" style="gap:8px; flex-wrap:wrap">
+        <span class="chip"><label style="color:var(--gris);font-size:11px">Sexo</label>
+          <select id="fpSexo" onchange="dibujarPacientes()"><option value="todos">Todos</option><option value="femenino">Femenino</option><option value="masculino">Masculino</option></select></span>
+        <span class="chip"><label style="color:var(--gris);font-size:11px">Edad</label>
+          <select id="fpEdad" onchange="dibujarPacientes()"><option value="todos">Todas</option><option value="0-17">0–17</option><option value="18-39">18–39</option><option value="40-64">40–64</option><option value="65-200">65+</option></select></span>
+        <label style="font-size:13px; display:inline-flex; align-items:center; gap:5px; cursor:pointer"><input type="checkbox" id="fpBanco" onchange="dibujarPacientes()"> 🏛️ Banco de México</label>
+        <span class="chip"><label style="color:var(--gris);font-size:11px">Últ. consulta desde</label>
+          <input type="date" id="fpDesde" onchange="dibujarPacientes()"></span>
+        <span class="chip"><label style="color:var(--gris);font-size:11px">hasta</label>
+          <input type="date" id="fpHasta" onchange="dibujarPacientes()"></span>
+        <button class="secundario" onclick="limpiarFiltrosPac()">Limpiar</button>
+      </div>
+      <div id="listaPacientes"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL CITA ===================== -->
+<div class="modal-fondo" id="modalCita">
+  <div class="modal">
+    <h2 id="tituloModalCita">Nueva cita</h2>
+    <div class="campo">
+      <label>Paciente</label>
+      <input list="listaNombres" id="citaPaciente" placeholder="Escribe para buscar…">
+      <datalist id="listaNombres"></datalist>
+    </div>
+    <div class="dos-columnas">
+      <div class="campo"><label>Fecha</label><input type="date" id="citaFecha"></div>
+      <div class="campo"><label>Hora</label><input type="time" id="citaHora"></div>
+    </div>
+    <div class="campo">
+      <label>Estado</label>
+      <select id="citaEstado">
+        <option>Pendiente</option><option>Asistió</option>
+        <option>No asistió</option><option>Cancelado</option>
+      </select>
+    </div>
+    <div class="campo"><label>Notas</label><input id="citaNotas" placeholder="Motivo, recordatorios…"></div>
+    <div class="acciones-modal">
+      <button class="secundario" onclick="cerrarModales()">Cancelar</button>
+      <div style="display:flex; gap:8px">
+        <button class="secundario" id="btnHistoriaCita" onclick="verHistoriaDesdeCita()">🩺 Ver historia clínica</button>
+        <button class="primario" onclick="guardarCita()">Guardar cita</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL PACIENTE ===================== -->
+<div class="modal-fondo" id="modalPaciente">
+  <div class="modal">
+    <h2 id="tituloModalPaciente">Nuevo paciente</h2>
+    <div class="dos-columnas">
+      <div class="campo"><label>Apellido paterno *</label><input id="pacApPaterno"></div>
+      <div class="campo"><label>Apellido materno *</label><input id="pacApMaterno"></div>
+    </div>
+    <div class="campo"><label>Nombre(s) *</label><input id="pacNombres"></div>
+    <div class="dos-columnas">
+      <div class="campo"><label>RFC</label><input id="pacId"></div>
+      <div class="campo"><label>Fecha de nacimiento</label><input type="date" id="pacNacimiento"></div>
+      <div class="campo"><label>Género</label>
+        <select id="pacGenero"><option value=""></option><option>Femenino</option><option>Masculino</option><option>Otro</option></select>
+      </div>
+      <div class="campo"><label>Grupo sanguíneo</label>
+        <select id="pacSangre"><option value=""></option><option>O+</option><option>O-</option><option>A+</option>
+          <option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select>
+      </div>
+      <div class="campo"><label>Teléfono</label><input id="pacTelefono"></div>
+      <div class="campo"><label>Teléfono secundario</label><input id="pacTelefono2"></div>
+      <div class="campo"><label>Correo</label><input id="pacCorreo"></div>
+    </div>
+    <div class="campo"><label>Domicilio</label><input id="pacDomicilio"></div>
+    <div class="campo"><label>Alergias</label><input id="pacAlergias"></div>
+
+    <div class="campo" style="margin-top:4px">
+      <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" id="pacBanco" style="width:auto" onchange="alternarBanco()">
+        🏛️ Paciente de Banco de México
+      </label>
+    </div>
+    <div class="campo" id="campoBancoNum" style="display:none">
+      <label>Número de Banco de México</label>
+      <input id="pacBancoNum">
+    </div>
+
+    <div class="campo" style="margin-top:4px">
+      <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" id="pacFactura" style="width:auto" onchange="alternarFacturacion()">
+        Capturar datos de facturación
+      </label>
+    </div>
+    <div id="bloqueFacturacion" style="display:none; background:var(--azul-suave); padding:12px; border-radius:10px; margin-bottom:10px">
+      <div class="campo"><label>RFC</label><input id="pacRfc" placeholder="Ej. MEVC881114HDF"></div>
+      <div class="campo">
+        <label style="text-transform:none; font-size:13px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
+          <input type="checkbox" id="pacFiscalIgual" checked style="width:auto" onchange="alternarFiscalIgual()">
+          La dirección fiscal es la misma que el domicilio
+        </label>
+      </div>
+      <div class="campo" id="campoDireccionFiscal" style="display:none">
+        <label>Dirección fiscal</label>
+        <input id="pacDireccionFiscal" placeholder="Calle, número, colonia, C.P., ciudad">
+      </div>
+    </div>
+
+    <p style="font-size:12px; color:var(--gris)">Los antecedentes médicos (alergias, antecedentes personales/familiares)
+       se capturan en la app de la doctora. Para ver la historia clínica o registrar una consulta, usa el botón "🩺 Historia".</p>
+    <div class="acciones-modal">
+      <button class="secundario" onclick="document.getElementById('modalPaciente').classList.remove('visible')">Cancelar</button>
+      <button class="primario" onclick="guardarPaciente()">Guardar paciente</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL HISTORIA CLÍNICA ===================== -->
+<div class="modal-fondo" id="modalHistoria">
+  <div class="modal" style="width:720px">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px">
+      <div>
+        <h2 id="histNombre" style="margin-bottom:2px">Historia clínica</h2>
+        <div id="histDatos" style="font-size:13px; color:var(--gris)"></div>
+      </div>
+      <div style="display:flex; gap:8px; flex-shrink:0">
+        <button class="secundario" onclick="editarPacienteDesdeHistoria()">✏️ Editar paciente</button>
+        <button class="primario" onclick="abrirModalConsulta()">+ Nueva consulta</button>
+      </div>
+    </div>
+    <div id="histLista" style="margin-top:14px"></div>
+    <div class="acciones-modal">
+      <button class="secundario" onclick="cerrarModales()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL NUEVA CONSULTA ===================== -->
+<div class="modal-fondo" id="modalConsulta">
+  <div class="modal" style="width:640px">
+    <h2 id="tituloModalConsulta">Nueva consulta</h2>
+    <div id="consultaPaciente" style="font-size:13px; color:var(--gris); margin-bottom:10px"></div>
+
+    <div class="dos-columnas">
+      <div class="campo"><label>Fecha</label><input type="date" id="conFecha"></div>
+      <div class="campo"><label>Tipo de consulta</label>
+        <select id="conTipo"><option>Seguimiento</option><option>Inicial</option></select>
+      </div>
+    </div>
+    <div class="campo"><label>Motivo de consulta</label><input id="conMotivo" placeholder="Ej. dolor abdominal"></div>
+    <div class="campo"><label>Síntomas / padecimiento actual</label><textarea id="conSintomas" rows="2"></textarea></div>
+
+    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Signos vitales</label>
+    <div class="sv-grid">
+      <div class="campo" style="margin:0"><label>TA (mmHg)</label><input id="svTA" oninput="calcIMC()"></div>
+      <div class="campo" style="margin:0"><label>FC (lpm)</label><input id="svFC"></div>
+      <div class="campo" style="margin:0"><label>FR (rpm)</label><input id="svFR"></div>
+      <div class="campo" style="margin:0"><label>Temp (°C)</label><input id="svTemp"></div>
+      <div class="campo" style="margin:0"><label>Peso (kg)</label><input id="svPeso" oninput="calcIMC()"></div>
+      <div class="campo" style="margin:0"><label>Talla (m)</label><input id="svTalla" oninput="calcIMC()"></div>
+      <div class="campo" style="margin:0"><label>SpO2 (%)</label><input id="svSpO2"></div>
+      <div class="campo" style="margin:0"><label>Glucosa</label><input id="svGlucosa"></div>
+    </div>
+    <div id="imcCalc" style="font-size:13px; color:var(--azul); margin:-6px 0 12px; display:none"></div>
+
+    <div class="campo"><label>Exploración física</label><textarea id="conExploracion" rows="2"></textarea></div>
+    <div class="campo"><label>Diagnóstico</label><textarea id="conDiagnostico" rows="2"></textarea></div>
+    <div class="campo"><label>Plan de tratamiento</label><textarea id="conPlan" rows="2"></textarea></div>
+
+    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Receta médica</label>
+    <div id="listaMeds" style="margin:6px 0"></div>
+    <button class="secundario" onclick="agregarMed()" style="margin-bottom:12px">+ Agregar medicamento</button>
+
+    <div class="campo"><label>Estudios de laboratorio / gabinete solicitados (uno por línea)</label><textarea id="conEstudios" rows="2"></textarea></div>
+    <div class="campo"><label>Interpretación de estudios</label><textarea id="conInterpretacion" rows="2"></textarea></div>
+    <div class="campo"><label>Notas clínicas</label><textarea id="conNotas" rows="2"></textarea></div>
+
+    <div class="dos-columnas">
+      <div class="campo"><label>Método de pago</label>
+        <select id="conPago"><option value="efectivo">Efectivo</option><option value="t_credito">Tarjeta de Crédito</option><option value="t_debito">Tarjeta de Débito</option><option value="deposito">Depósito</option></select>
+      </div>
+      <div class="campo"><label>Monto pagado (MXN)</label><input id="conMonto" placeholder="0.00"></div>
+    </div>
+
+    <div class="acciones-modal">
+      <button class="secundario" onclick="document.getElementById('modalConsulta').classList.remove('visible')">Cancelar</button>
+      <button class="primario" onclick="guardarConsulta()">Guardar consulta</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ============================================================
+// Consola en la Nube — edita pacientes.json, citas.json y
+// consultas.json directamente en OneDrive mediante Microsoft Graph,
+// iniciando sesión con la cuenta Microsoft dueña de la carpeta
+// (OAuth 2.0 + PKCE, sin librerías ni servidores intermedios).
+// Funciona desde cualquier lugar aunque la Mac esté apagada.
+// Debe estar publicada en una dirección https (ver la guía).
+// ============================================================
+
+let pacientes = [];
+let citas = [];
+let consultas = [];
+let citaEditandoId = null;
+let pacienteEditandoId = null;
+let historiaPacienteId = null;
+let medsConsulta = [];
+
+const $ = (id) => document.getElementById(id);
+const hoy = () => new Date().toISOString().slice(0, 10);
+const uuid = () => {
+  // crypto.randomUUID solo existe en contextos seguros (https o archivo local);
+  // en http:// de red local se genera el UUID v4 con getRandomValues.
+  if (crypto.randomUUID) return crypto.randomUUID().toUpperCase();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return (h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20)).toUpperCase();
+};
+
+// ---------- Configuración guardada en este dispositivo ----------
+const RUTA_DEFECTO = "REGISTRO PACIENTES V2/Datos";
+const cfgLeer = (k, defecto) => localStorage.getItem("nube." + k) || defecto || "";
+const cfgGuardar = (k, v) => localStorage.setItem("nube." + k, v);
+
+// ---------- Sesión con Microsoft (OAuth 2.0 + PKCE, sin librerías) ----------
+const AUTORIDAD = "https://login.microsoftonline.com/common/oauth2/v2.0";
+const PERMISOS = "openid profile offline_access Files.ReadWrite";
+const redirUri = () => location.origin + location.pathname;
+
+function b64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Redirige a la página de inicio de sesión de Microsoft
+async function iniciarSesion() {
+  const clientId = cfgLeer("clientId");
+  if (!clientId) { mostrarConfig(); return; }
+  const verificador = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const desafio = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verificador)));
+  const estado = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  sessionStorage.setItem("nube.verificador", verificador);
+  sessionStorage.setItem("nube.estado", estado);
+  location.href = AUTORIDAD + "/authorize?" + new URLSearchParams({
+    client_id: clientId, response_type: "code", redirect_uri: redirUri(),
+    response_mode: "query", scope: PERMISOS, state: estado,
+    code_challenge: desafio, code_challenge_method: "S256",
+  });
+}
+
+async function pedirTokens(cuerpo) {
+  const r = await fetch(AUTORIDAD + "/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: cfgLeer("clientId"), scope: PERMISOS, ...cuerpo }),
+  });
+  const datos = await r.json().catch(() => ({}));
+  if (!r.ok || !datos.access_token) {
+    throw new Error(datos.error_description || datos.error || "Microsoft no aceptó la conexión");
+  }
+  cfgGuardar("token", datos.access_token);
+  // Se renueva 2 minutos antes de que caduque, por seguridad
+  cfgGuardar("expira", String(Date.now() + (datos.expires_in - 120) * 1000));
+  if (datos.refresh_token) cfgGuardar("refresco", datos.refresh_token);
+  return datos.access_token;
+}
+
+// Al volver de la página de Microsoft con ?code=..., se canjea por tokens
+async function procesarRegreso() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("error")) {
+    history.replaceState(null, "", location.pathname);
+    mostrarErrorConexion("Microsoft devolvió un error: " + (params.get("error_description") || params.get("error")));
+    return;
+  }
+  const code = params.get("code");
+  if (!code) return;
+  history.replaceState(null, "", location.pathname);
+  if (params.get("state") !== sessionStorage.getItem("nube.estado")) return;
+  try {
+    await pedirTokens({
+      grant_type: "authorization_code", code,
+      redirect_uri: redirUri(),
+      code_verifier: sessionStorage.getItem("nube.verificador") || "",
+    });
+  } catch (e) {
+    mostrarErrorConexion(e.message);
+  }
+}
+
+// Devuelve un token vigente, renovándolo si hace falta; null si la sesión murió
+async function obtenerToken() {
+  if (Number(cfgLeer("expira", "0")) > Date.now()) return cfgLeer("token");
+  const refresco = cfgLeer("refresco");
+  if (!refresco) return null;
+  try {
+    return await pedirTokens({ grant_type: "refresh_token", refresh_token: refresco });
+  } catch { return null; }
+}
+
+function cerrarSesion() {
+  ["token", "expira", "refresco"].forEach((k) => localStorage.removeItem("nube." + k));
+  location.reload();
+}
+
+// ---------- Lectura y escritura de JSON (OneDrive vía Microsoft Graph) ----------
+function urlGraph(nombre) {
+  const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
+  return "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta) + "/" + nombre + ":/content";
+}
+async function graphFetch(nombre, opciones = {}) {
+  const token = await obtenerToken();
+  if (!token) { sesionCaducada(); throw new Error("Sesión caducada"); }
+  return fetch(urlGraph(nombre), {
+    ...opciones,
+    headers: { Authorization: "Bearer " + token, ...(opciones.headers || {}) },
+  });
+}
+// Si falla la lectura NO devuelve lista vacía: lanza error, para que
+// jamás se sobrescriba el archivo real con una lista incompleta.
+async function leerJSON(nombre) {
+  const r = await graphFetch(nombre).catch(() => null);
+  if (r && r.status === 404) return [];   // archivo aún no existe: base vacía
+  if (!r || !r.ok) {
+    // Aviso solo si la persona está guardando algo (hay un formulario abierto);
+    // el refresco automático de fondo falla en silencio y reintenta después.
+    if (document.querySelector(".modal-fondo.visible")) {
+      alert("No se pudo leer la base en OneDrive. Revisa tu conexión a internet e inténtalo de nuevo.");
+    }
+    throw new Error("No se pudo leer " + nombre);
+  }
+  const texto = await r.text();
+  return texto.trim() ? JSON.parse(texto) : [];
+}
+async function escribirJSON(nombre, datos) {
+  let r = null;
+  try {
+    r = await graphFetch(nombre, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(datos, null, 2),
+    });
+  } catch (e) {
+    if (e.message === "Sesión caducada") throw e;
+  }
+  if (!r || !r.ok) {
+    alert("No se pudo guardar en OneDrive. Revisa tu conexión a internet e inténtalo de nuevo.");
+    throw new Error("No se pudo guardar " + nombre);
+  }
+}
+async function recargar() {
+  try {
+    const [p, c, k] = await Promise.all([
+      leerJSON("pacientes.json"), leerJSON("citas.json"), leerJSON("consultas.json"),
+    ]);
+    pacientes = p; citas = c; consultas = k;
+    $("estadoConexion").textContent = "☁️ Conectada a OneDrive";
+  } catch {
+    // Sin conexión: se conservan los datos ya cargados y se avisa en el encabezado
+    $("estadoConexion").textContent = "⚠️ Sin conexión — reintentando…";
+  }
+  dibujarTodo();
+}
+
+// ---------- Conexión y pantallas ----------
+function mostrarPantalla(bloque) {
+  $("pantallaConexion").style.display = "block";
+  $("aplicacion").style.display = "none";
+  $("bloqueLogin").style.display = bloque === "login" ? "block" : "none";
+  $("bloqueConfig").style.display = bloque === "config" ? "block" : "none";
+}
+function mostrarLogin() { mostrarPantalla("login"); }
+function mostrarConfig() {
+  $("cfgClientId").value = cfgLeer("clientId");
+  $("cfgRuta").value = cfgLeer("ruta", RUTA_DEFECTO);
+  mostrarPantalla("config");
+}
+function mostrarErrorConexion(msg) {
+  const e = $("msgErrorNube");
+  e.textContent = msg;
+  e.style.display = "block";
+}
+function limpiarError() { $("msgErrorNube").style.display = "none"; }
+function sesionCaducada() {
+  mostrarLogin();
+  mostrarErrorConexion("Tu sesión con Microsoft caducó. Vuelve a iniciar sesión (es rápido).");
+}
+
+let refrescoIniciado = false;
+async function iniciarUI() {
+  $("pantallaConexion").style.display = "none";
+  $("aplicacion").style.display = "block";
+  $("btnActualizar").style.display = "inline-block";
+  $("btnConfig").style.display = "inline-block";
+  $("btnSalir").style.display = "inline-block";
+  $("fechaAgenda").value = hoy();
+  await recargar();
+  // Refresco automático cada 45 s (si no hay un formulario abierto)
+  if (!refrescoIniciado) {
+    refrescoIniciado = true;
+    setInterval(async () => {
+      if (!document.querySelector(".modal-fondo.visible")) await recargar();
+    }, 45000);
+  }
+}
+
+async function conectarNube() {
+  const token = await obtenerToken();
+  if (!token) { mostrarLogin(); return; }
+  // Lectura de prueba: valida la sesión y que la ruta de la carpeta sea correcta
+  let r = null;
+  try { r = await graphFetch("pacientes.json"); } catch { }
+  if (r && r.status === 404) {
+    mostrarConfig();
+    mostrarErrorConexion("No encontré «" + cfgLeer("ruta", RUTA_DEFECTO) + "/pacientes.json» en ese OneDrive. "
+      + "Revisa la ruta de la carpeta (o que hayas iniciado sesión con la cuenta correcta).");
+    return;
+  }
+  if (!r || !r.ok) {
+    mostrarLogin();
+    mostrarErrorConexion("No se pudo conectar con OneDrive"
+      + (r ? " (código " + r.status + ")" : "") + ". Revisa tu conexión a internet.");
+    return;
+  }
+  await iniciarUI();
+}
+
+// ---------- Utilidades ----------
+function nombreDe(pacienteId) {
+  const p = pacientes.find((x) => x.id === pacienteId);
+  return p ? p.name : "(paciente eliminado)";
+}
+function escapar(t) {
+  return String(t ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function normalizar(t) {
+  return String(t ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// ---------- Agenda ----------
+let modoAgenda = "dia";
+const DOW = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+function setModo(m) {
+  modoAgenda = m;
+  ["mes","semana","dia"].forEach(x => $("modo"+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle("activo", x===m));
+  dibujarAgenda();
+}
+function moverAgenda(n) {
+  const f = new Date($("fechaAgenda").value + "T12:00:00");
+  if (modoAgenda === "mes") f.setMonth(f.getMonth() + n);
+  else if (modoAgenda === "semana") f.setDate(f.getDate() + n*7);
+  else f.setDate(f.getDate() + n);
+  $("fechaAgenda").value = f.toISOString().slice(0, 10);
+  dibujarAgenda();
+}
+function irHoy() { $("fechaAgenda").value = hoy(); dibujarAgenda(); }
+function citasDe(fecha) { return citas.filter((c) => c.date === fecha).sort((a,b) => (a.time||"").localeCompare(b.time||"")); }
+function nombrePac(id) { const p = pacientes.find(x=>x.id===id); return p ? p.name : "(eliminado)"; }
+function nombreClic(id) { return `<a href="#" onclick="abrirHistoria('${id}');return false" style="color:var(--azul); text-decoration:none">${escapar(nombrePac(id))}</a>`; }
+
+function dibujarAgenda() {
+  if (modoAgenda === "mes") return dibujarMes();
+  if (modoAgenda === "semana") return dibujarSemana();
+  return dibujarDia();
+}
+
+function dibujarMes() {
+  const base = new Date($("fechaAgenda").value + "T12:00:00");
+  const y = base.getFullYear(), mo = base.getMonth();
+  $("tituloAgenda").textContent = MESES[mo] + " " + y;
+  const primero = new Date(y, mo, 1);
+  const offset = (primero.getDay() + 6) % 7; // lunes=0
+  const diasMes = new Date(y, mo+1, 0).getDate();
+  let html = '<div class="cal-grid">' + DOW.map(d=>`<div class="cal-dow">${d}</div>`).join("");
+  for (let i=0;i<offset;i++) html += '<div class="cal-dia otro"></div>';
+  for (let d=1; d<=diasMes; d++) {
+    const fecha = `${y}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    const cs = citasDe(fecha);
+    const esHoy = fecha === hoy();
+    let citasHtml = cs.slice(0,3).map(c=>`<div class="cal-cita">${escapar(c.time)} ${escapar(nombrePac(c.patientId).split(" ")[0])}</div>`).join("");
+    if (cs.length>3) citasHtml += `<div class="cal-cita" style="background:#e0e7ff">+${cs.length-3} más</div>`;
+    html += `<div class="cal-dia${esHoy?" hoy":""}" onclick="$('fechaAgenda').value='${fecha}';setModo('dia')">
+      <div class="cal-num">${d}</div>${citasHtml}</div>`;
+  }
+  $("listaCitas").innerHTML = html + "</div>";
+}
+
+function dibujarSemana() {
+  const base = new Date($("fechaAgenda").value + "T12:00:00");
+  const lunes = new Date(base); lunes.setDate(base.getDate() - ((base.getDay()+6)%7));
+  const fin = new Date(lunes); fin.setDate(lunes.getDate()+6);
+  $("tituloAgenda").textContent = `${lunes.getDate()} ${MESES[lunes.getMonth()].slice(0,3)} – ${fin.getDate()} ${MESES[fin.getMonth()].slice(0,3)}`;
+  let html = '<div class="cal-grid">';
+  for (let i=0;i<7;i++) {
+    const dia = new Date(lunes); dia.setDate(lunes.getDate()+i);
+    const fecha = dia.toISOString().slice(0,10);
+    const cs = citasDe(fecha);
+    const esHoy = fecha === hoy();
+    html += `<div>
+      <div class="cal-dow" style="cursor:pointer" onclick="$('fechaAgenda').value='${fecha}';setModo('dia')"><b>${DOW[i]} ${dia.getDate()}</b></div>
+      <div class="sem-col" ${esHoy?'style="border-color:var(--azul)"':''}>
+        ${cs.length? cs.map(c=>`<div class="sem-cita" onclick="abrirModalCita('${c.id}')"><b>${escapar(c.time)}</b> ${escapar(nombrePac(c.patientId))}</div>`).join("") : '<div style="font-size:11px;color:var(--gris);text-align:center;padding-top:20px">—</div>'}
+      </div></div>`;
+  }
+  $("listaCitas").innerHTML = html + "</div>";
+}
+
+function dibujarDia() {
+  const fecha = $("fechaAgenda").value;
+  const dObj = new Date(fecha + "T12:00:00");
+  $("tituloAgenda").textContent = `${DOW[(dObj.getDay()+6)%7]} ${dObj.getDate()} de ${MESES[dObj.getMonth()]}`;
+  const delDia = citasDe(fecha);
+  if (!delDia.length) {
+    $("listaCitas").innerHTML = '<div class="vacio">Sin citas este día. Usa "+ Nueva cita".</div>';
+    return;
+  }
+  let html = "<table><tr><th>Hora</th><th>Paciente</th><th>Estado</th><th>Notas</th><th></th></tr>";
+  for (const c of delDia) {
+    html += `<tr>
+      <td><b>${escapar(c.time)}</b></td>
+      <td>${nombreClic(c.patientId)}</td>
+      <td><select onchange="cambiarEstado('${c.id}', this.value)">
+        ${["Pendiente", "Asistió", "No asistió", "Cancelado"]
+          .map((e) => `<option ${e === c.status ? "selected" : ""}>${e}</option>`).join("")}
+      </select></td>
+      <td>${escapar(c.notes)}</td>
+      <td style="white-space:nowrap">
+        <button class="secundario" onclick="abrirModalCita('${c.id}')">Editar</button>
+        <button class="peligro" onclick="eliminarCita('${c.id}')">Eliminar</button>
+      </td></tr>`;
+  }
+  $("listaCitas").innerHTML = html + "</table>";
+}
+
+function abrirModalCita(id) {
+  citaEditandoId = id || null;
+  $("tituloModalCita").textContent = id ? "Editar cita" : "Nueva cita";
+  $("listaNombres").innerHTML = pacientes
+    .map((p) => `<option value="${escapar(p.name)}">`).join("");
+  if (id) {
+    const c = citas.find((x) => x.id === id);
+    $("citaPaciente").value = nombreDe(c.patientId);
+    $("citaFecha").value = c.date;
+    $("citaHora").value = c.time;
+    $("citaEstado").value = c.status;
+    $("citaNotas").value = c.notes || "";
+  } else {
+    $("citaPaciente").value = "";
+    $("citaFecha").value = $("fechaAgenda").value;
+    $("citaHora").value = "09:00";
+    $("citaEstado").value = "Pendiente";
+    $("citaNotas").value = "";
+  }
+  $("modalCita").classList.add("visible");
+}
+
+function verHistoriaDesdeCita() {
+  let pid = null;
+  if (citaEditandoId) {
+    const c = citas.find((x) => x.id === citaEditandoId);
+    if (c) pid = c.patientId;
+  }
+  if (!pid) {
+    const nombre = $("citaPaciente").value.trim();
+    const p = pacientes.find((x) => normalizar(x.name) === normalizar(nombre));
+    if (p) pid = p.id;
+  }
+  if (!pid) { alert("Elige o selecciona un paciente primero."); return; }
+  $("modalCita").classList.remove("visible");
+  abrirHistoria(pid);
+}
+
+async function guardarCita() {
+  const nombre = $("citaPaciente").value.trim();
+  const paciente = pacientes.find((p) => normalizar(p.name) === normalizar(nombre));
+  if (!paciente) { alert("Elige un paciente de la lista (escríbelo y selecciónalo)."); return; }
+  if (!$("citaFecha").value || !$("citaHora").value) { alert("Falta la fecha o la hora."); return; }
+
+  // Releer el archivo justo antes de escribir, para no pisar cambios de la doctora
+  const actuales = await leerJSON("citas.json");
+  if (citaEditandoId) {
+    const i = actuales.findIndex((c) => c.id === citaEditandoId);
+    if (i >= 0) {
+      actuales[i] = { ...actuales[i], patientId: paciente.id, date: $("citaFecha").value,
+        time: $("citaHora").value, status: $("citaEstado").value, notes: $("citaNotas").value };
+    }
+  } else {
+    actuales.push({ id: uuid(), patientId: paciente.id, date: $("citaFecha").value,
+      time: $("citaHora").value, status: $("citaEstado").value, notes: $("citaNotas").value });
+  }
+  await escribirJSON("citas.json", actuales);
+  citas = actuales;
+  cerrarModales();
+  dibujarTodo();
+}
+
+async function cambiarEstado(id, estado) {
+  const actuales = await leerJSON("citas.json");
+  const i = actuales.findIndex((c) => c.id === id);
+  if (i >= 0) { actuales[i].status = estado; await escribirJSON("citas.json", actuales); citas = actuales; }
+  dibujarTodo();
+}
+
+async function eliminarCita(id) {
+  const c = citas.find((x) => x.id === id);
+  if (!confirm(`¿Eliminar la cita de ${nombreDe(c.patientId)} a las ${c.time}?`)) return;
+  const actuales = (await leerJSON("citas.json")).filter((x) => x.id !== id);
+  await escribirJSON("citas.json", actuales);
+  citas = actuales;
+  dibujarTodo();
+}
+
+// ---------- Pacientes ----------
+function limpiarFiltrosPac() {
+  $("fpSexo").value = "todos"; $("fpEdad").value = "todos"; $("fpBanco").checked = false;
+  $("fpDesde").value = ""; $("fpHasta").value = ""; dibujarPacientes();
+}
+function sexoNorm(g) { g = (g||"").toLowerCase(); return g.startsWith("f") ? "femenino" : g.startsWith("m") ? "masculino" : "otro"; }
+function ultConsulta(id) {
+  const fechas = consultas.filter(c=>c.patientId===id).map(c=>String(c.date).slice(0,10)).sort();
+  return fechas.length ? fechas[fechas.length-1] : null;
+}
+function dibujarPacientes() {
+  const b = normalizar($("buscarPaciente").value);
+  const fSexo = $("fpSexo") ? $("fpSexo").value : "todos";
+  const fEdad = $("fpEdad") ? $("fpEdad").value : "todos";
+  const fBanco = $("fpBanco") ? $("fpBanco").checked : false;
+  const fDesde = $("fpDesde") ? $("fpDesde").value : "";
+  const fHasta = $("fpHasta") ? $("fpHasta").value : "";
+  const lista = pacientes
+    .filter((p) => !b || normalizar(p.name).includes(b)
+      || normalizar(p.rutOrId).includes(b) || normalizar(p.phone).includes(b) || normalizar(p.phone2).includes(b))
+    .filter((p) => fSexo === "todos" || sexoNorm(p.gender) === fSexo)
+    .filter((p) => {
+      if (fEdad === "todos") return true;
+      const a = edadNum(p.birthDate); if (a === null) return false;
+      const [lo, hi] = fEdad.split("-").map(Number); return a >= lo && a <= hi;
+    })
+    .filter((p) => !fBanco || p.bancoMexico)
+    .filter((p) => {
+      if (!fDesde && !fHasta) return true;
+      const u = ultConsulta(p.id); if (!u) return false;
+      if (fDesde && u < fDesde) return false;
+      if (fHasta && u > fHasta) return false;
+      return true;
+    })
+    .sort((a, z) => a.name.localeCompare(z.name, "es"));
+  if (!lista.length) {
+    $("listaPacientes").innerHTML = '<div class="vacio">Sin resultados con estos filtros.</div>';
+    return;
+  }
+  let html = "<table><tr><th>Nombre</th><th>RFC</th><th>Teléfono</th><th>Nacimiento</th><th></th></tr>";
+  for (const p of lista) {
+    html += `<tr>
+      <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a></td>
+      <td>${escapar(p.rutOrId)}</td>
+      <td>${escapar(p.phone)}</td>
+      <td>${escapar(p.birthDate)}</td>
+      <td style="white-space:nowrap">
+        <button class="secundario" onclick="abrirHistoria('${p.id}')">🩺 Historia</button>
+        <button class="secundario" onclick="abrirModalPaciente('${p.id}')">Editar</button>
+      </td>
+    </tr>`;
+  }
+  $("listaPacientes").innerHTML = html + "</table>";
+}
+
+function abrirModalPaciente(id) {
+  pacienteEditandoId = id || null;
+  $("tituloModalPaciente").textContent = id ? "Editar paciente" : "Nuevo paciente";
+  const p = id ? pacientes.find((x) => x.id === id) : {};
+  // Se toman las partes si existen; si solo hay nombre junto, se separa como
+  // "NOMBRE(S) PATERNO MATERNO" (los dos últimos tokens son los apellidos).
+  let paterno = p.paternalSurname || "", materno = p.maternalSurname || "", nombres = p.givenNames || "";
+  if (!paterno && !materno && !nombres && p.name) {
+    const partes = p.name.trim().split(/\s+/);
+    if (partes.length === 1) { nombres = partes[0]; }
+    else if (partes.length === 2) { nombres = partes[0]; paterno = partes[1]; }
+    else { paterno = partes[partes.length - 2]; materno = partes[partes.length - 1]; nombres = partes.slice(0, partes.length - 2).join(" "); }
+  }
+  $("pacApPaterno").value = paterno;
+  $("pacApMaterno").value = materno;
+  $("pacNombres").value = nombres;
+  $("pacId").value = p.rutOrId || "";
+  $("pacNacimiento").value = (p.birthDate || "").slice(0, 10);
+  $("pacGenero").value = p.gender || "";
+  $("pacSangre").value = p.bloodType || "";
+  $("pacTelefono").value = p.phone || "";
+  $("pacTelefono2").value = p.phone2 || "";
+  $("pacCorreo").value = p.email || "";
+  $("pacDomicilio").value = p.address || "";
+  $("pacAlergias").value = p.allergies || "";
+  $("pacBanco").checked = !!p.bancoMexico;
+  $("pacBancoNum").value = p.bancoMexicoNumero || "";
+  alternarBanco();
+  $("pacFactura").checked = !!p.wantsInvoice;
+  $("pacRfc").value = p.rfc || "";
+  $("pacFiscalIgual").checked = p.taxAddressIsSame !== false;
+  $("pacDireccionFiscal").value = p.taxAddress || "";
+  alternarFacturacion();
+  $("modalPaciente").classList.add("visible");
+}
+
+function alternarFacturacion() {
+  $("bloqueFacturacion").style.display = $("pacFactura").checked ? "block" : "none";
+  alternarFiscalIgual();
+}
+function alternarFiscalIgual() {
+  $("campoDireccionFiscal").style.display = $("pacFiscalIgual").checked ? "none" : "block";
+}
+function alternarBanco() {
+  $("campoBancoNum").style.display = $("pacBanco").checked ? "block" : "none";
+}
+
+async function guardarPaciente() {
+  const paterno = $("pacApPaterno").value.trim();
+  const materno = $("pacApMaterno").value.trim();
+  const nombres = $("pacNombres").value.trim();
+  if (!paterno || !materno || !nombres) {
+    alert("Apellido paterno, apellido materno y nombre(s) son obligatorios.");
+    return;
+  }
+  const nombre = [nombres, paterno, materno].filter(Boolean).join(" ");
+
+  const actuales = await leerJSON("pacientes.json");
+  const facturacion = $("pacFactura").checked;
+  const fiscalIgual = $("pacFiscalIgual").checked;
+  const campos = {
+    name: nombre,
+    paternalSurname: paterno,
+    maternalSurname: materno,
+    givenNames: nombres,
+    rutOrId: $("pacId").value.trim(),
+    birthDate: $("pacNacimiento").value,
+    gender: $("pacGenero").value,
+    bloodType: $("pacSangre").value,
+    phone: $("pacTelefono").value.trim(),
+    phone2: $("pacTelefono2").value.trim(),
+    email: $("pacCorreo").value.trim(),
+    address: $("pacDomicilio").value.trim(),
+    allergies: $("pacAlergias").value.trim(),
+    bancoMexico: $("pacBanco").checked,
+    bancoMexicoNumero: $("pacBanco").checked ? $("pacBancoNum").value.trim() : "",
+    wantsInvoice: facturacion,
+    rfc: facturacion ? $("pacRfc").value.trim().toUpperCase() : "",
+    taxAddressIsSame: facturacion ? fiscalIgual : true,
+    taxAddress: facturacion && !fiscalIgual ? $("pacDireccionFiscal").value.trim() : "",
+    updatedAt: new Date().toISOString(),
+  };
+  if (pacienteEditandoId) {
+    const i = actuales.findIndex((p) => p.id === pacienteEditandoId);
+    // Se conservan intactos los campos clínicos existentes (antecedentes, resúmenes, etc.)
+    if (i >= 0) actuales[i] = { ...actuales[i], ...campos };
+  } else {
+    actuales.push({
+      id: uuid(),
+      familyHistory: "", personalHistory: "", continuousMedication: "",
+      createdAt: new Date().toISOString(),
+      ...campos,
+    });
+  }
+  await escribirJSON("pacientes.json", actuales);
+  pacientes = actuales;
+  $("modalPaciente").classList.remove("visible");
+  // Si se editó desde la historia, ésta sigue abierta: refrescar su encabezado.
+  if ($("modalHistoria").classList.contains("visible") && pacienteEditandoId) {
+    abrirHistoria(pacienteEditandoId);
+  }
+  dibujarTodo();
+}
+
+// ---------- Historia clínica ----------
+function edadNum(bd) {
+  if (!bd) return null;
+  const d = new Date(String(bd).slice(0,10) + "T12:00:00");
+  if (isNaN(d)) return null;
+  const t = new Date(); let a = t.getFullYear() - d.getFullYear();
+  const m = t.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && t.getDate() < d.getDate())) a--;
+  return a;
+}
+function edadDe(bd) { const a = edadNum(bd); return a === null ? "" : a + " años"; }
+function pagoLabel(m) {
+  return { efectivo:"Efectivo", t_credito:"Tarjeta de Crédito", t_debito:"Tarjeta de Débito", deposito:"Depósito" }[m] || "Efectivo";
+}
+function abrirHistoria(id) {
+  historiaPacienteId = id;
+  const p = pacientes.find((x) => x.id === id);
+  if (!p) return;
+  $("histNombre").textContent = p.name;
+  $("histDatos").innerHTML = [
+    p.rutOrId ? "RFC: " + escapar(p.rutOrId) : "",
+    edadDe(p.birthDate), p.gender, p.phone ? "Tel: " + escapar(p.phone) : "",
+    p.allergies ? "<span style='color:var(--rojo)'>Alergias: " + escapar(p.allergies) + "</span>" : "",
+  ].filter(Boolean).join(" · ");
+  renderHistoria();
+  $("modalHistoria").classList.add("visible");
+}
+function renderHistoria() {
+  const cons = consultas
+    .filter((c) => c.patientId === historiaPacienteId)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  if (!cons.length) {
+    $("histLista").innerHTML = '<div class="vacio">Aún no hay consultas registradas. Usa "+ Nueva consulta".</div>';
+    return;
+  }
+  let html = `<div style="font-size:12px; color:var(--gris); margin-bottom:6px">${cons.length} consulta(s) · toca cada una para expandir o colapsar el detalle</div>`;
+  cons.forEach((c, idx) => {
+    const meds = (c.prescription && c.prescription.medications) || [];
+    const v = c.vitals || {};
+    const svTxt = ["ta","fc","fr","temperatura","peso","talla","spo2","glucosa"]
+      .map((k) => v[k] ? ({ta:"TA",fc:"FC",fr:"FR",temperatura:"Temp",peso:"Peso",talla:"Talla",spo2:"SpO2",glucosa:"Gluc"}[k] + " " + escapar(v[k])) : "")
+      .filter(Boolean).join(" · ");
+    const resumen = escapar(c.diagnosis || c.reason || "Consulta");
+    const abierta = idx === 0; // la más reciente arranca expandida
+    const detalle = `
+      ${fila("Motivo", c.reason)} ${fila("Síntomas", c.symptoms)}
+      ${svTxt ? fila("Signos vitales", svTxt) : ""}
+      ${fila("Exploración", c.physicalExam)} ${fila("Diagnóstico", c.diagnosis)}
+      ${fila("Plan", c.treatmentPlan)}
+      ${meds.length ? "<div style='margin-top:4px'><b>Receta:</b><ul style='margin:2px 0 0 18px'>" + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
+      ${fila("Estudios", c.studies)} ${fila("Interpretación", c.studyInterpretation)}
+      ${fila("Notas", c.notes)}
+      ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}`;
+    html += `<div style="border:1px solid var(--borde); border-radius:10px; margin-bottom:10px; overflow:hidden">
+      <div onclick="toggleConsulta(${idx})" style="cursor:pointer; padding:10px 12px; background:var(--fondo); display:flex; align-items:center; gap:8px">
+        <span id="chev${idx}" style="color:var(--gris); flex-shrink:0">${abierta ? "▾" : "▸"}</span>
+        <b style="white-space:nowrap; flex-shrink:0">${fechaLarga(c.date)}</b>
+        <span style="color:var(--gris); font-size:12px; white-space:nowrap; flex-shrink:0">Consulta ${escapar((c.visitType||"Seguimiento").toLowerCase())}</span>
+        <span style="color:var(--gris); font-size:13px; margin-left:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">· ${resumen}</span>
+      </div>
+      <div id="det${idx}" style="padding:${abierta?"10px 12px":"0 12px"}; display:${abierta?"block":"none"}">${detalle}</div>
+    </div>`;
+  });
+  $("histLista").innerHTML = html;
+}
+function fechaLarga(iso) {
+  const d = new Date(String(iso).slice(0,10) + "T12:00:00");
+  if (isNaN(d)) return escapar(iso);
+  return d.getDate() + " de " + MESES[d.getMonth()] + " de " + d.getFullYear();
+}
+function editarPacienteDesdeHistoria() {
+  if (historiaPacienteId) abrirModalPaciente(historiaPacienteId);
+}
+function toggleConsulta(idx) {
+  const d = $("det" + idx), ch = $("chev" + idx);
+  if (!d) return;
+  const abierta = d.style.display !== "none";
+  d.style.display = abierta ? "none" : "block";
+  d.style.padding = abierta ? "0 12px" : "10px 12px";
+  ch.textContent = abierta ? "▸" : "▾";
+}
+function fila(etq, val) {
+  val = (val == null ? "" : String(val)).trim();
+  return val ? `<div style="font-size:13px; margin-top:2px"><span style="color:var(--gris)">${etq}:</span> ${escapar(val)}</div>` : "";
+}
+
+// ---------- Nueva consulta ----------
+function abrirModalConsulta() {
+  const p = pacientes.find((x) => x.id === historiaPacienteId);
+  if (!p) { alert("Primero abre la historia de un paciente."); return; }
+  const previas = consultas.filter((c) => c.patientId === p.id);
+  $("consultaPaciente").textContent = "Paciente: " + p.name;
+  $("conFecha").value = hoy();
+  $("conTipo").value = previas.length ? "Seguimiento" : "Inicial";
+  ["conMotivo","conSintomas","conExploracion","conDiagnostico","conPlan","conEstudios","conInterpretacion","conNotas","conMonto",
+   "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
+  $("conPago").value = "efectivo";
+  // Traer signos vitales de la consulta anterior (editables)
+  const ant = previas.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+  if (ant && ant.vitals) {
+    const v = ant.vitals;
+    $("svTA").value=v.ta||""; $("svFC").value=v.fc||""; $("svFR").value=v.fr||"";
+    $("svTemp").value=v.temperatura||""; $("svPeso").value=v.peso||""; $("svTalla").value=v.talla||"";
+    $("svSpO2").value=v.spo2||""; $("svGlucosa").value=v.glucosa||"";
+  }
+  medsConsulta = [];
+  dibujarMeds();
+  calcIMC();
+  $("modalConsulta").classList.add("visible");
+}
+function agregarMed() { medsConsulta.push({ name:"", dosage:"", frequency:"", duration:"", notes:"" }); dibujarMeds(); }
+function quitarMed(i) { medsConsulta.splice(i, 1); dibujarMeds(); }
+function dibujarMeds() {
+  if (!medsConsulta.length) { $("listaMeds").innerHTML = "<div style='font-size:12px;color:var(--gris)'>Sin medicamentos.</div>"; return; }
+  $("listaMeds").innerHTML = medsConsulta.map((m, i) => `
+    <div style="border:1px solid var(--borde); border-radius:8px; padding:8px; margin-bottom:6px">
+      <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--gris)"><b>MEDICAMENTO #${i+1}</b>
+        <button class="peligro" onclick="quitarMed(${i})">Quitar</button></div>
+      <input placeholder="Nombre" value="${escapar(m.name)}" oninput="medsConsulta[${i}].name=this.value" style="margin:4px 0">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px">
+        <input placeholder="Dosis (500 mg)" value="${escapar(m.dosage)}" oninput="medsConsulta[${i}].dosage=this.value">
+        <input placeholder="Frecuencia (8 horas)" value="${escapar(m.frequency)}" oninput="medsConsulta[${i}].frequency=this.value">
+        <input placeholder="Duración (7 días)" value="${escapar(m.duration)}" oninput="medsConsulta[${i}].duration=this.value">
+        <input placeholder="Indicaciones" value="${escapar(m.notes)}" oninput="medsConsulta[${i}].notes=this.value">
+      </div>
+    </div>`).join("");
+}
+function numDe(t) { const m = String(t||"").replace(",",".").match(/[\d.]+/); return m ? parseFloat(m[0]) : null; }
+function calcIMC() {
+  const p = numDe($("svPeso").value); let t = numDe($("svTalla").value);
+  const el = $("imcCalc");
+  if (!p || !t) { el.style.display = "none"; return; }
+  if (t > 3) t = t / 100;
+  const imc = p / (t * t);
+  if (!isFinite(imc) || imc < 5 || imc > 200) { el.style.display = "none"; return; }
+  let cls = imc < 18.5 ? "Bajo peso" : imc < 25 ? "Peso normal" : imc < 30 ? "Sobrepeso" : "Obesidad";
+  el.style.display = "block";
+  el.textContent = "IMC: " + (Math.round(imc * 10) / 10) + " kg/m² · " + cls;
+}
+async function guardarConsulta() {
+  const p = pacientes.find((x) => x.id === historiaPacienteId);
+  if (!p) return;
+  if (!$("conMotivo").value.trim() && !$("conDiagnostico").value.trim()) {
+    alert("Captura al menos el motivo o el diagnóstico."); return;
+  }
+  const meds = medsConsulta.filter((m) => m.name.trim());
+  const vitals = { ta:$("svTA").value.trim(), fc:$("svFC").value.trim(), fr:$("svFR").value.trim(),
+    temperatura:$("svTemp").value.trim(), peso:$("svPeso").value.trim(), talla:$("svTalla").value.trim(),
+    spo2:$("svSpO2").value.trim(), glucosa:$("svGlucosa").value.trim() };
+  const vacio = Object.values(vitals).every((x) => !x);
+  const monto = numDe($("conMonto").value);
+  const nueva = {
+    id: uuid(), patientId: p.id, date: $("conFecha").value,
+    visitType: $("conTipo").value,
+    reason: $("conMotivo").value.trim(), symptoms: $("conSintomas").value.trim(),
+    diagnosis: $("conDiagnostico").value.trim(), notes: $("conNotas").value.trim(),
+    prescription: meds.length ? { medications: meds } : null,
+    studies: $("conEstudios").value.trim(), studyInterpretation: $("conInterpretacion").value.trim(),
+    requiresInvoice: false, confirmedRfc: "", confirmedTaxAddress: "",
+    paymentMethod: $("conPago").value, amountPaid: monto,
+    vitals: vacio ? null : vitals, physicalExam: $("conExploracion").value.trim(),
+    treatmentPlan: $("conPlan").value.trim(), studyFiles: [],
+  };
+  const actuales = await leerJSON("consultas.json");
+  actuales.push(nueva);
+  await escribirJSON("consultas.json", actuales);
+  consultas = actuales;
+  $("modalConsulta").classList.remove("visible");
+  renderHistoria();
+}
+
+// ---------- Generales ----------
+function cerrarModales() {
+  document.querySelectorAll(".modal-fondo").forEach((m) => m.classList.remove("visible"));
+}
+function dibujarTodo() { dibujarAgenda(); dibujarPacientes(); }
+
+$("tabAgenda").onclick = () => {
+  $("tabAgenda").classList.add("activa"); $("tabPacientes").classList.remove("activa");
+  $("vistaAgenda").style.display = "block"; $("vistaPacientes").style.display = "none";
+};
+$("tabPacientes").onclick = () => {
+  $("tabPacientes").classList.add("activa"); $("tabAgenda").classList.remove("activa");
+  $("vistaPacientes").style.display = "block"; $("vistaAgenda").style.display = "none";
+};
+$("btnActualizar").onclick = recargar;
+$("btnSalir").onclick = () => {
+  if (confirm("¿Cerrar la sesión con Microsoft en este dispositivo?")) cerrarSesion();
+};
+$("btnConfig").onclick = () => { limpiarError(); mostrarConfig(); };
+$("btnIrConfig").onclick = () => { limpiarError(); mostrarConfig(); };
+$("btnLogin").onclick = () => { limpiarError(); iniciarSesion(); };
+$("btnGuardarConfig").onclick = () => {
+  limpiarError();
+  const id = $("cfgClientId").value.trim();
+  if (!/^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/.test(id)) {
+    mostrarErrorConexion("El ID de aplicación no parece válido: deben ser 36 caracteres con guiones, "
+      + "como 1a2b3c4d-1234-abcd-5678-1a2b3c4d5e6f. Cópialo de portal.azure.com.");
+    return;
+  }
+  cfgGuardar("clientId", id);
+  cfgGuardar("ruta", ($("cfgRuta").value.trim() || RUTA_DEFECTO).replace(/^\/+|\/+$/g, ""));
+  iniciarSesion();
+};
+document.querySelectorAll(".modal-fondo").forEach((m) => {
+  m.addEventListener("mousedown", (e) => { if (e.target === m) cerrarModales(); });
+});
+
+// Arranque
+(async () => {
+  const esLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (location.protocol === "file:" || (location.protocol === "http:" && !esLocal)) {
+    mostrarPantalla("login");
+    $("bloqueLogin").style.display = "none";
+    mostrarErrorConexion("Esta página debe abrirse desde su dirección https publicada "
+      + "(el inicio de sesión de Microsoft no funciona abriéndola como archivo). "
+      + "Sigue la \"Guía - Consola en la Nube.md\".");
+    return;
+  }
+  await procesarRegreso();          // por si venimos de la página de Microsoft
+  if (!cfgLeer("clientId")) mostrarConfig();
+  else await conectarNube();
+})();
+</script>
+</body>
+</html>
