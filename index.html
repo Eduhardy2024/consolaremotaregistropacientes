@@ -188,9 +188,9 @@
     <div id="vistaAgenda" class="tarjeta">
       <div class="fila-controles">
         <div style="display:inline-flex; border:1px solid var(--borde); border-radius:8px; overflow:hidden">
-          <button class="modo-btn" id="modoMes" onclick="setModo('mes')">Mes</button>
+          <button class="modo-btn activo" id="modoMes" onclick="setModo('mes')">Mes</button>
           <button class="modo-btn" id="modoSemana" onclick="setModo('semana')">Semana</button>
-          <button class="modo-btn activo" id="modoDia" onclick="setModo('dia')">Día</button>
+          <button class="modo-btn" id="modoDia" onclick="setModo('dia')">Día</button>
         </div>
         <button class="secundario" onclick="moverAgenda(-1)">←</button>
         <input type="date" id="fechaAgenda" onchange="dibujarAgenda()">
@@ -659,7 +659,7 @@ function normalizar(t) {
 }
 
 // ---------- Agenda ----------
-let modoAgenda = "dia";
+let modoAgenda = "mes";   // al conectar, lo primero que se ve es el mes completo
 const DOW = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 function setModo(m) {
@@ -699,9 +699,12 @@ function dibujarMes() {
     const fecha = `${y}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     const cs = citasDe(fecha);
     const esHoy = fecha === hoy();
-    let citasHtml = cs.slice(0,3).map(c=>`<div class="cal-cita">${escapar(c.time)} ${escapar(nombrePac(c.patientId).split(" ")[0])}</div>`).join("");
-    if (cs.length>3) citasHtml += `<div class="cal-cita" style="background:#e0e7ff">+${cs.length-3} más</div>`;
-    html += `<div class="cal-dia${esHoy?" hoy":""}" onclick="$('fechaAgenda').value='${fecha}';setModo('dia')">
+    // Al pasar el mouse por el día (o por el "+N más") se ven todas las citas
+    const listaDia = cs.map(c=>escapar(c.time + "  " + nombrePac(c.patientId))).join("\n");
+    let citasHtml = cs.slice(0,3).map(c=>`<div class="cal-cita" title="${escapar(c.time)} ${escapar(nombrePac(c.patientId))}">${escapar(c.time)} ${escapar(nombrePac(c.patientId).split(" ")[0])}</div>`).join("");
+    if (cs.length>3) citasHtml += `<div class="cal-cita" style="background:#ccfbf1; font-weight:600">+${cs.length-3} más</div>`;
+    // Clic en un día: primero a la vista de la semana (de ahí, clic en el día lleva al detalle)
+    html += `<div class="cal-dia${esHoy?" hoy":""}" title="${listaDia}" onclick="$('fechaAgenda').value='${fecha}';setModo('semana')">
       <div class="cal-num">${d}</div>${citasHtml}</div>`;
   }
   $("listaCitas").innerHTML = html + "</div>";
