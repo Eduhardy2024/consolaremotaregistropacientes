@@ -387,6 +387,15 @@ async function conectarNube(){
       '<a class="btn-primario" style="text-decoration:none; display:inline-block" href="./">Abrir la Consola</a>';
     return;
   }
+  // Si la carpeta no está en el OneDrive propio, buscarla en las compartidas
+  // (caso del doctor entrando a la carpeta compartida por la administradora).
+  baseGraph = { tipo: "propio" };
+  let prueba = null;
+  try{ prueba = await fetch(urlGraph("pacientes.json"), { headers: { Authorization: "Bearer " + token } }); }catch{}
+  if(prueba && prueba.status === 404){
+    const compartida = await buscarBaseCompartida(token);
+    if(compartida) baseGraph = compartida;
+  }
   $("pantallaConexion").style.display="none";
   $("panel").style.display="block";
   await recargar();
@@ -402,14 +411,6 @@ async function conectarRemoto(){
     return conectarRemoto();
   }
   localStorage.setItem("claveMovil", claveMovil||"");
-  // Si la carpeta no está en el OneDrive propio, buscarla en las compartidas
-  baseGraph = { tipo: "propio" };
-  let prueba = null;
-  try{ prueba = await fetch(urlGraph("pacientes.json"), { headers: { Authorization: "Bearer " + token } }); }catch{}
-  if(prueba && prueba.status === 404){
-    const compartida = await buscarBaseCompartida(token);
-    if(compartida) baseGraph = compartida;
-  }
   $("pantallaConexion").style.display="none";
   $("panel").style.display="block";
   await recargar();

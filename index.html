@@ -485,6 +485,12 @@ async function pedirTokens(cuerpo) {
     throw new Error(datos.error_description || datos.error || "Microsoft no aceptó la conexión");
   }
   cfgGuardar("token", datos.access_token);
+  if (datos.id_token) {
+    try {
+      const cuerpo = JSON.parse(atob(datos.id_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      cfgGuardar("cuenta", cuerpo.name || cuerpo.preferred_username || "");
+    } catch {}
+  }
   // Se renueva 2 minutos antes de que caduque, por seguridad
   cfgGuardar("expira", String(Date.now() + (datos.expires_in - 120) * 1000));
   if (datos.refresh_token) cfgGuardar("refresco", datos.refresh_token);
@@ -610,7 +616,13 @@ async function recargar() {
       leerJSON("pacientes.json"), leerJSON("citas.json"), leerJSON("consultas.json"),
     ]);
     pacientes = p; citas = c; consultas = k;
-    $("estadoConexion").textContent = "☁️ Conectada al OneDrive de " + (duenoOneDrive || "…");
+    let letrero = duenoOneDrive
+      ? "☁️ OneDrive de " + duenoOneDrive
+      : "☁️ Conectada a OneDrive";
+    if (baseGraph.tipo === "compartido") letrero += " (carpeta compartida)";
+    const cuenta = cfgLeer("cuenta");
+    if (cuenta && cuenta !== duenoOneDrive) letrero += " · sesión de " + cuenta;
+    $("estadoConexion").textContent = letrero;
   } catch {
     // Sin conexión: se conservan los datos ya cargados y se avisa en el encabezado
     $("estadoConexion").textContent = "⚠️ Sin conexión — reintentando…";
@@ -692,15 +704,17 @@ async function conectarNube() {
   // Mostrar de quién es el OneDrive conectado (para no confundir cuentas)
   try {
     const urlDrive = baseGraph.tipo === "compartido"
-      ? "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "?$select=owner"
-      : "https://graph.microsoft.com/v1.0/me/drive?$select=owner";
+      ? "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId
+      : "https://graph.microsoft.com/v1.0/me/drive";
     const rd = await fetch(urlDrive, { headers: { Authorization: "Bearer " + (await obtenerToken()) } });
     if (rd.ok) {
       const d = await rd.json();
       duenoOneDrive = (d.owner && d.owner.user && d.owner.user.displayName) || "";
-      if (duenoOneDrive && baseGraph.tipo === "compartido") duenoOneDrive += " (carpeta compartida)";
     }
   } catch {}
+  // Respaldo: si Microsoft no dio el nombre del dueño y la base es propia,
+  // el dueño es quien inició sesión (su nombre viene en el token).
+  if (!duenoOneDrive && baseGraph.tipo === "propio") duenoOneDrive = cfgLeer("cuenta");
   await iniciarUI();
 }
 
@@ -1268,7 +1282,11 @@ async function eliminarConsulta(id) {
   if (!c) return;
   if (!confirm("¿Eliminar la consulta del " + fechaLarga(c.date) + "? "
       + "También se eliminarán sus archivos de estudios adjuntos. Esta acción no se puede deshacer.")) return;
-  const actuales = (await leerJSON("consultas.json")).filter((x) => x.id !== id);
+  const actuales = await leerJSON("consultas.json");
+  // Solo UNA aparición: si por un error hubiera dos registros con el mismo id,
+  // cada clic elimina una copia, no todas.
+  const i = actuales.findIndex((x) => x.id === id);
+  if (i >= 0) actuales.splice(i, 1);
   await escribirJSON("consultas.json", actuales);
   consultas = actuales;
   borrarEstudios(id);   // mejor esfuerzo; si falla, solo quedan archivos huérfanos
@@ -1292,7 +1310,13 @@ async function borrarEstudios(consultaId) {
   } catch {}
 }
 
+let guardandoConsulta = false;
 async function guardarConsulta() {
+  // Candado: guardar en la nube tarda unos segundos; un doble clic
+  // duplicaba la consulta. Se ignoran clics mientras hay un guardado en curso.
+  if (guardandoConsulta) return;
+  guardandoConsulta = true;
+  try {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
   if (!p) return;
   if (!$("conMotivo").value.trim() && !$("conDiagnostico").value.trim()) {
@@ -1358,6 +1382,7 @@ async function guardarConsulta() {
   consultaEditandoId = null;
   $("modalConsulta").classList.remove("visible");
   renderHistoria();
+  } finally { guardandoConsulta = false; }
 }
 
 // ---------- Generales ----------
