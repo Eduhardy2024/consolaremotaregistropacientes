@@ -415,6 +415,7 @@
 // Debe estar publicada en una dirección https (ver la guía).
 // ============================================================
 
+let duenoOneDrive = "";   // nombre del dueño del OneDrive conectado
 let pacientes = [];
 let citas = [];
 let consultas = [];
@@ -578,7 +579,7 @@ async function recargar() {
       leerJSON("pacientes.json"), leerJSON("citas.json"), leerJSON("consultas.json"),
     ]);
     pacientes = p; citas = c; consultas = k;
-    $("estadoConexion").textContent = "☁️ Conectada a OneDrive";
+    $("estadoConexion").textContent = "☁️ Conectada al OneDrive de " + (duenoOneDrive || "…");
   } catch {
     // Sin conexión: se conservan los datos ya cargados y se avisa en el encabezado
     $("estadoConexion").textContent = "⚠️ Sin conexión — reintentando…";
@@ -647,6 +648,15 @@ async function conectarNube() {
       + (r ? " (código " + r.status + ")" : "") + ". Revisa tu conexión a internet.");
     return;
   }
+  // Mostrar de quién es el OneDrive conectado (para no confundir cuentas)
+  try {
+    const rd = await fetch("https://graph.microsoft.com/v1.0/me/drive?$select=owner",
+      { headers: { Authorization: "Bearer " + (await obtenerToken()) } });
+    if (rd.ok) {
+      const d = await rd.json();
+      duenoOneDrive = (d.owner && d.owner.user && d.owner.user.displayName) || "";
+    }
+  } catch {}
   await iniciarUI();
 }
 
