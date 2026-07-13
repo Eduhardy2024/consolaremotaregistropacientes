@@ -6,21 +6,39 @@
 <title>Consola en la Nube — Registro de Pacientes</title>
 <style>
   :root {
-    --azul: #2563eb; --azul-suave: #eff6ff; --verde: #16a34a; --rojo: #dc2626;
-    --naranja: #ea580c; --gris: #6b7280; --fondo: #f8fafc; --borde: #e2e8f0;
+    /* Paleta del Panel de Métricas: turquesa como color principal */
+    --azul: #0d9488; --azul-suave: #f0fdfa; --verde: #16a34a; --rojo: #dc2626;
+    --naranja: #ea580c; --gris: #64748b; --fondo: #f1f5f9; --borde: #e2e8f0;
+    --turquesa-osc: #0f766e; --tinta: #0f172a;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
-  body { background: var(--fondo); color: #0f172a; }
-  header { background: white; border-bottom: 1px solid var(--borde); padding: 14px 24px;
-           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  header h1 { font-size: 18px; }
-  header .estado { font-size: 13px; color: var(--gris); }
-  .contenedor { max-width: 980px; margin: 0 auto; padding: 20px; }
-  .pestanas { display: flex; gap: 8px; margin-bottom: 16px; }
-  .pestanas button { padding: 9px 22px; border: 1px solid var(--borde); background: white;
-                     border-radius: 10px; font-size: 14px; cursor: pointer; }
-  .pestanas button.activa { background: var(--azul); color: white; border-color: var(--azul); font-weight: 600; }
-  .tarjeta { background: white; border: 1px solid var(--borde); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+  body { background: var(--fondo); color: var(--tinta); display: flex; min-height: 100vh; }
+
+  /* ---------- Barra lateral (mismo estilo del Panel de Métricas) ---------- */
+  .sidebar { width: 76px; background: linear-gradient(180deg, var(--azul), var(--turquesa-osc));
+    display: flex; flex-direction: column; align-items: center; padding: 18px 0; gap: 6px;
+    position: sticky; top: 0; height: 100vh; flex-shrink: 0; }
+  .sidebar .logo { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.15);
+    display: grid; place-items: center; color: white; font-weight: 800; font-size: 20px; margin-bottom: 14px; }
+  .navbtn { width: 46px; height: 46px; border-radius: 13px; border: none; background: transparent;
+    color: rgba(255,255,255,.8); display: grid; place-items: center; cursor: pointer; transition: .15s;
+    text-decoration: none; }
+  .navbtn:hover { background: rgba(255,255,255,.15); color: white; }
+  .navbtn svg { width: 22px; height: 22px; }
+  .sidebar .abajo { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+  .main { flex: 1; min-width: 0; padding: 22px 26px; max-width: 1200px; }
+  .titulo { font-size: 26px; font-weight: 800; }
+  .subtitulo-pag { color: var(--gris); font-size: 14px; margin: 2px 0 16px; }
+  .contenedor { max-width: 980px; }
+
+  .pestanas { display: flex; gap: 6px; margin: 4px 0 18px; border-bottom: 1px solid var(--borde); }
+  .pestanas button { padding: 9px 18px; border: none; background: none; border-radius: 0;
+                     font-size: 14px; font-weight: 600; color: var(--gris); cursor: pointer;
+                     border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  .pestanas button.activa { background: none; color: var(--azul); border-bottom-color: var(--azul); font-weight: 700; }
+  .tarjeta { background: white; border: none; border-radius: 18px; padding: 18px 20px; margin-bottom: 16px;
+             box-shadow: 0 1px 3px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.05); }
   .fila-controles { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--azul); border-color: transparent; }
@@ -65,9 +83,9 @@
   .cal-dia.hoy { border-color: var(--azul); }
   .cal-dia.otro { background: #fafbfc; color: #cbd5e1; }
   .cal-num { font-size: 13px; font-weight: 600; }
-  .cal-cita { font-size: 10px; background: #eff6ff; border-radius: 3px; padding: 1px 3px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cal-cita { font-size: 10px; background: var(--azul-suave); border-radius: 3px; padding: 1px 3px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sem-col { border: 1px solid var(--borde); border-radius: 8px; padding: 6px; min-height: 120px; }
-  .sem-cita { font-size: 11px; background: #eff6ff; border-radius: 4px; padding: 3px 5px; margin-bottom: 4px; cursor: pointer; }
+  .sem-cita { font-size: 11px; background: var(--azul-suave); border-radius: 4px; padding: 3px 5px; margin-bottom: 4px; cursor: pointer; }
   #pantallaConexion { text-align: center; padding: 60px 20px; }
   #pantallaConexion h2 { margin-bottom: 10px; }
   #pantallaConexion p { color: var(--gris); margin-bottom: 20px; max-width: 520px; margin-left: auto; margin-right: auto; }
@@ -76,9 +94,11 @@
 
   /* ---------- Ajustes para iPad / iPhone (pantallas chicas y táctiles) ---------- */
   @media (max-width: 700px) {
-    .contenedor { padding: 10px; }
-    header { padding: 10px 12px; gap: 8px; }
-    header h1 { font-size: 16px; }
+    .sidebar { width: 56px; padding: 12px 0; }
+    .sidebar .logo { width: 34px; height: 34px; font-size: 17px; }
+    .navbtn { width: 40px; height: 40px; }
+    .main { padding: 14px 10px; }
+    .titulo { font-size: 20px; }
     /* 16px evita que iOS haga zoom automático al tocar un campo */
     input, select, textarea { font-size: 16px; }
     button.primario, button.secundario, .pestanas button { font-size: 15px; }
@@ -99,15 +119,27 @@
 </head>
 <body>
 
-<header>
-  <h1>☁️ Consola en la Nube</h1>
-  <span class="estado" id="estadoConexion">Sin conectar</span>
-  <span style="flex:1"></span>
-  <a class="secundario" id="btnDashboard" href="panel.html" style="display:none; text-decoration:none">📊 Dashboard</a>
-  <button class="secundario" id="btnActualizar" style="display:none">⟳ Actualizar</button>
-  <button class="secundario" id="btnConfig" style="display:none">⚙️</button>
-  <button class="secundario" id="btnSalir" style="display:none">Cerrar sesión</button>
-</header>
+<nav class="sidebar">
+  <div class="logo">R</div>
+  <a class="navbtn" id="btnDashboard" href="panel.html" title="Panel de métricas (Dashboard)" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/></svg>
+  </a>
+  <button class="navbtn" id="btnActualizar" title="Actualizar datos" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
+  </button>
+  <div class="abajo">
+    <button class="navbtn" id="btnConfig" title="Configuración" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M2 12h3M19 12h3M4.9 19.1l2.2-2.2M16.9 7.1l2.2-2.2"/></svg>
+    </button>
+    <button class="navbtn" id="btnSalir" title="Cerrar sesión" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="titulo">☁️ Consola en la Nube</div>
+  <div class="subtitulo-pag" id="estadoConexion">Sin conectar</div>
 
 <div class="contenedor">
 
@@ -194,6 +226,7 @@
     </div>
   </div>
 </div>
+</div><!-- /main -->
 
 <!-- ===================== MODAL CITA ===================== -->
 <div class="modal-fondo" id="modalCita">
@@ -386,7 +419,11 @@ let historiaPacienteId = null;
 let medsConsulta = [];
 
 const $ = (id) => document.getElementById(id);
-const hoy = () => new Date().toISOString().slice(0, 10);
+// Fecha local (no UTC): con toISOString, después de las 6 pm en México ya marcaba "mañana"
+const hoy = () => {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
 const uuid = () => {
   // crypto.randomUUID solo existe en contextos seguros (https o archivo local);
   // en http:// de red local se genera el UUID v4 con getRandomValues.
@@ -572,10 +609,10 @@ let refrescoIniciado = false;
 async function iniciarUI() {
   $("pantallaConexion").style.display = "none";
   $("aplicacion").style.display = "block";
-  $("btnDashboard").style.display = "inline-block";
-  $("btnActualizar").style.display = "inline-block";
-  $("btnConfig").style.display = "inline-block";
-  $("btnSalir").style.display = "inline-block";
+  $("btnDashboard").style.display = "";
+  $("btnActualizar").style.display = "";
+  $("btnConfig").style.display = "";
+  $("btnSalir").style.display = "";
   $("fechaAgenda").value = hoy();
   await recargar();
   // Refresco automático cada 45 s (si no hay un formulario abierto)
