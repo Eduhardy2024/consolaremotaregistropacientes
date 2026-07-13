@@ -1116,6 +1116,8 @@ function renderHistoria() {
         <span style="flex:1"></span>
         <button class="secundario" style="flex-shrink:0; padding:4px 10px; font-size:12px"
           onclick="event.stopPropagation(); abrirModalConsulta('${c.id}')">✏️ Editar</button>
+        <button class="peligro" style="flex-shrink:0"
+          onclick="event.stopPropagation(); eliminarConsulta('${c.id}')">Eliminar</button>
       </div>
       <div id="det${idx}" style="padding:${abierta?"10px 12px":"0 12px"}; display:${abierta?"block":"none"}">${detalle}</div>
     </div>`;
@@ -1258,6 +1260,36 @@ async function subirEstudio(consultaId, archivo, nombre) {
     r = await fetch(url, opciones);
   }
   if (!r.ok) throw new Error("OneDrive código " + r.status);
+}
+
+// Elimina la consulta (y sus archivos de estudios) previa confirmación
+async function eliminarConsulta(id) {
+  const c = consultas.find((x) => x.id === id);
+  if (!c) return;
+  if (!confirm("¿Eliminar la consulta del " + fechaLarga(c.date) + "? "
+      + "También se eliminarán sus archivos de estudios adjuntos. Esta acción no se puede deshacer.")) return;
+  const actuales = (await leerJSON("consultas.json")).filter((x) => x.id !== id);
+  await escribirJSON("consultas.json", actuales);
+  consultas = actuales;
+  borrarEstudios(id);   // mejor esfuerzo; si falla, solo quedan archivos huérfanos
+  renderHistoria();
+}
+
+async function borrarEstudios(consultaId) {
+  try {
+    const token = await obtenerToken();
+    if (!token) return;
+    let url;
+    if (baseGraph.tipo === "compartido") {
+      const path = [baseGraph.resto, "Estudios/" + consultaId].filter(Boolean).join("/");
+      url = "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "/items/"
+        + baseGraph.itemId + ":/" + encodeURI(path);
+    } else {
+      const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
+      url = "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta + "/Estudios/" + consultaId);
+    }
+    await fetch(url, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
+  } catch {}
 }
 
 async function guardarConsulta() {
