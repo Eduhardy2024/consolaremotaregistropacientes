@@ -382,6 +382,11 @@
     <button class="secundario" onclick="agregarMed()" style="margin-bottom:12px">+ Agregar medicamento</button>
 
     <div class="campo"><label>Estudios de laboratorio / gabinete solicitados (uno por línea)</label><textarea id="conEstudios" rows="2"></textarea></div>
+    <div class="campo"><label>Archivos de estudios (PDF o imágenes)</label>
+      <input type="file" id="conArchivos" multiple accept="application/pdf,image/*">
+      <div style="font-size:12px; color:var(--gris); margin-top:3px">
+        Se adjuntan a esta consulta; en la app de la doctora se pueden abrir y pedir su interpretación con IA.</div>
+    </div>
     <div class="campo"><label>Interpretación de estudios</label><textarea id="conInterpretacion" rows="2"></textarea></div>
     <div class="campo"><label>Notas clínicas</label><textarea id="conNotas" rows="2"></textarea></div>
 
@@ -1045,6 +1050,7 @@ function renderHistoria() {
       ${fila("Plan", c.treatmentPlan)}
       ${meds.length ? "<div style='margin-top:4px'><b>Receta:</b><ul style='margin:2px 0 0 18px'>" + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
       ${fila("Estudios", c.studies)} ${fila("Interpretación", c.studyInterpretation)}
+      ${(c.studyFiles && c.studyFiles.length) ? fila("Archivos adjuntos", c.studyFiles.join(", ")) : ""}
       ${fila("Notas", c.notes)}
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}`;
     html += `<div style="border:1px solid var(--borde); border-radius:10px; margin-bottom:10px; overflow:hidden">
@@ -1091,6 +1097,7 @@ function abrirModalConsulta() {
   ["conMotivo","conSintomas","conExploracion","conDiagnostico","conPlan","conEstudios","conInterpretacion","conNotas","conMonto",
    "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
   $("conPago").value = "efectivo";
+  $("conArchivos").value = "";
   // Traer signos vitales de la consulta anterior (editables)
   const ant = previas.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
   if (ant && ant.vitals) {
@@ -1133,6 +1140,37 @@ function calcIMC() {
   el.style.display = "block";
   el.textContent = "IMC: " + (Math.round(imc * 10) / 10) + " kg/m² · " + cls;
 }
+function nombreArchivoSeguro(nombre) {
+  return String(nombre || "archivo").replace(/[\/\\:*?"<>|#%&{}$!'@+`=]/g, "_").slice(-120);
+}
+// Sube el archivo a OneDrive en <ruta>/Estudios/<id de consulta>/<nombre>
+async function crearCarpetaGraph(rutaPadre, nombreCarpeta, token) {
+  // 409 si ya existe: no importa
+  await fetch("https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(rutaPadre) + ":/children", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: nombreCarpeta, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
+  }).catch(() => {});
+}
+async function subirEstudio(consultaId, archivo, nombre) {
+  const token = await obtenerToken();
+  if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
+  const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
+  const url = "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta)
+    + "/Estudios/" + encodeURIComponent(consultaId) + "/" + encodeURIComponent(nombre) + ":/content";
+  const opciones = { method: "PUT",
+    headers: { Authorization: "Bearer " + token, "Content-Type": archivo.type || "application/octet-stream" },
+    body: archivo };
+  let r = await fetch(url, opciones);
+  if (r.status === 404) {
+    // Las carpetas intermedias aún no existen: se crean y se reintenta una vez
+    await crearCarpetaGraph(ruta, "Estudios", token);
+    await crearCarpetaGraph(ruta + "/Estudios", consultaId, token);
+    r = await fetch(url, opciones);
+  }
+  if (!r.ok) throw new Error("OneDrive código " + r.status);
+}
+
 async function guardarConsulta() {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
   if (!p) return;
@@ -1145,8 +1183,26 @@ async function guardarConsulta() {
     spo2:$("svSpO2").value.trim(), glucosa:$("svGlucosa").value.trim() };
   const vacio = Object.values(vitals).every((x) => !x);
   const monto = numDe($("conMonto").value);
+  const idConsulta = uuid();
+  // Primero se suben los archivos de estudios; si alguno falla, no se guarda la
+  // consulta (para no dejarla apuntando a archivos que no existen).
+  const archivos = [...(($("conArchivos") && $("conArchivos").files) || [])];
+  const nombresSubidos = [];
+  try {
+    for (const archivo of archivos) {
+      let nombre = nombreArchivoSeguro(archivo.name);
+      let n = 2;
+      while (nombresSubidos.includes(nombre)) nombre = (n++) + "_" + nombreArchivoSeguro(archivo.name);
+      await subirEstudio(idConsulta, archivo, nombre);
+      nombresSubidos.push(nombre);
+    }
+  } catch (e) {
+    alert("No se pudo subir un archivo de estudios (" + e.message + "). "
+      + "No se guardó la consulta; revisa la conexión e inténtalo de nuevo.");
+    return;
+  }
   const nueva = {
-    id: uuid(), patientId: p.id, date: $("conFecha").value,
+    id: idConsulta, patientId: p.id, date: $("conFecha").value,
     visitType: $("conTipo").value,
     reason: $("conMotivo").value.trim(), symptoms: $("conSintomas").value.trim(),
     diagnosis: $("conDiagnostico").value.trim(), notes: $("conNotas").value.trim(),
@@ -1155,7 +1211,7 @@ async function guardarConsulta() {
     requiresInvoice: false, confirmedRfc: "", confirmedTaxAddress: "",
     paymentMethod: $("conPago").value, amountPaid: monto,
     vitals: vacio ? null : vitals, physicalExam: $("conExploracion").value.trim(),
-    treatmentPlan: $("conPlan").value.trim(), studyFiles: [],
+    treatmentPlan: $("conPlan").value.trim(), studyFiles: nombresSubidos,
   };
   const actuales = await leerJSON("consultas.json");
   actuales.push(nueva);
