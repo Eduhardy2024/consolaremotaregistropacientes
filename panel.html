@@ -309,7 +309,7 @@ async function tokenNube(){
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: clientId, grant_type: "refresh_token",
-        refresh_token: refresco, scope: "openid profile offline_access Files.ReadWrite" }),
+        refresh_token: refresco, scope: "openid profile offline_access Files.ReadWrite.All" }),
     });
     const d = await r.json();
     if(!r.ok || !d.access_token) return null;
@@ -319,9 +319,33 @@ async function tokenNube(){
     return d.access_token;
   }catch{ return null; }
 }
+let baseGraph = { tipo: "propio" };   // OneDrive propio o carpeta compartida
 function urlGraph(nombre){
+  if(baseGraph.tipo === "compartido"){
+    const resto = (baseGraph.resto ? baseGraph.resto + "/" : "") + nombre;
+    return "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "/items/"
+      + baseGraph.itemId + ":/" + encodeURI(resto) + ":/content";
+  }
   const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
   return "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta) + "/" + nombre + ":/content";
+}
+async function buscarBaseCompartida(token){
+  try{
+    const r = await fetch("https://graph.microsoft.com/v1.0/me/drive/sharedWithMe",
+      { headers: { Authorization: "Bearer " + token } });
+    if(!r.ok) return null;
+    const datos = await r.json();
+    const partes = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "").split("/");
+    const objetivo = partes[0].toLowerCase();
+    for(const item of (datos.value || [])){
+      const remoto = item.remoteItem;
+      if(!remoto || !remoto.folder) continue;
+      if(((item.name || remoto.name || "")).toLowerCase() !== objetivo) continue;
+      return { tipo: "compartido", driveId: remoto.parentReference.driveId,
+               itemId: remoto.id, resto: partes.slice(1).join("/") };
+    }
+  }catch{}
+  return null;
 }
 let carpeta = null, pacientes = [], consultas = [], citas = [], mapaPac = {};
 const filtros = { agrupar: "mes", rango: "12", estado: "todos", edad: "todos", sexo: "todos" };
@@ -378,6 +402,14 @@ async function conectarRemoto(){
     return conectarRemoto();
   }
   localStorage.setItem("claveMovil", claveMovil||"");
+  // Si la carpeta no está en el OneDrive propio, buscarla en las compartidas
+  baseGraph = { tipo: "propio" };
+  let prueba = null;
+  try{ prueba = await fetch(urlGraph("pacientes.json"), { headers: { Authorization: "Bearer " + token } }); }catch{}
+  if(prueba && prueba.status === 404){
+    const compartida = await buscarBaseCompartida(token);
+    if(compartida) baseGraph = compartida;
+  }
   $("pantallaConexion").style.display="none";
   $("panel").style.display="block";
   await recargar();

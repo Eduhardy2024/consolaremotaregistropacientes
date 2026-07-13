@@ -449,7 +449,7 @@ const cfgGuardar = (k, v) => localStorage.setItem("nube." + k, v);
 // Se usa la puerta de cuentas personales (/consumers): funciona tanto si el
 // registro de Azure admite "solo cuentas personales" como si admite todas.
 const AUTORIDAD = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
-const PERMISOS = "openid profile offline_access Files.ReadWrite";
+const PERMISOS = "openid profile offline_access Files.ReadWrite.All";
 const redirUri = () => location.origin + location.pathname;
 
 function b64url(buf) {
@@ -529,9 +529,39 @@ function cerrarSesion() {
 }
 
 // ---------- Lectura y escritura de JSON (OneDrive vía Microsoft Graph) ----------
-function urlGraph(nombre) {
+// La base puede ser el OneDrive propio, o una carpeta que otra cuenta compartió
+// con quien inició sesión (p. ej. el doctor entrando a la carpeta de la administradora).
+let baseGraph = { tipo: "propio" };
+function urlGraphDe(rel) {   // rel es relativa a la carpeta Datos
+  if (baseGraph.tipo === "compartido") {
+    const resto = (baseGraph.resto ? baseGraph.resto + "/" : "") + rel;
+    return "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "/items/"
+      + baseGraph.itemId + ":/" + encodeURI(resto) + ":/content";
+  }
   const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
-  return "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta) + "/" + nombre + ":/content";
+  return "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta + "/" + rel) + ":/content";
+}
+function urlGraph(nombre) { return urlGraphDe(nombre); }
+
+// Busca en "Compartido conmigo" una carpeta cuyo nombre coincida con el primer
+// tramo de la ruta configurada (p. ej. "REGISTRO PACIENTES V2").
+async function buscarBaseCompartida(token) {
+  try {
+    const r = await fetch("https://graph.microsoft.com/v1.0/me/drive/sharedWithMe",
+      { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) return null;
+    const datos = await r.json();
+    const partes = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "").split("/");
+    const objetivo = partes[0].toLowerCase();
+    for (const item of (datos.value || [])) {
+      const remoto = item.remoteItem;
+      if (!remoto || !remoto.folder) continue;
+      if (((item.name || remoto.name || "")).toLowerCase() !== objetivo) continue;
+      return { tipo: "compartido", driveId: remoto.parentReference.driveId,
+               itemId: remoto.id, resto: partes.slice(1).join("/") };
+    }
+  } catch {}
+  return null;
 }
 async function graphFetch(nombre, opciones = {}) {
   const token = await obtenerToken();
@@ -633,13 +663,23 @@ async function iniciarUI() {
 async function conectarNube() {
   const token = await obtenerToken();
   if (!token) { mostrarLogin(); return; }
-  // Lectura de prueba: valida la sesión y que la ruta de la carpeta sea correcta
+  // Lectura de prueba: primero en el OneDrive propio; si la carpeta no está ahí,
+  // se busca entre las carpetas compartidas con esta cuenta.
+  baseGraph = { tipo: "propio" };
   let r = null;
   try { r = await graphFetch("pacientes.json"); } catch { }
   if (r && r.status === 404) {
+    const compartida = await buscarBaseCompartida(await obtenerToken());
+    if (compartida) {
+      baseGraph = compartida;
+      r = null;
+      try { r = await graphFetch("pacientes.json"); } catch { }
+    }
+  }
+  if (r && r.status === 404) {
     mostrarConfig();
-    mostrarErrorConexion("No encontré «" + cfgLeer("ruta", RUTA_DEFECTO) + "/pacientes.json» en ese OneDrive. "
-      + "Revisa la ruta de la carpeta (o que hayas iniciado sesión con la cuenta correcta).");
+    mostrarErrorConexion("No encontré «" + cfgLeer("ruta", RUTA_DEFECTO) + "/pacientes.json» ni en este OneDrive "
+      + "ni en sus carpetas compartidas. Revisa la ruta, o que la carpeta esté compartida con esta cuenta.");
     return;
   }
   if (!r || !r.ok) {
@@ -650,11 +690,14 @@ async function conectarNube() {
   }
   // Mostrar de quién es el OneDrive conectado (para no confundir cuentas)
   try {
-    const rd = await fetch("https://graph.microsoft.com/v1.0/me/drive?$select=owner",
-      { headers: { Authorization: "Bearer " + (await obtenerToken()) } });
+    const urlDrive = baseGraph.tipo === "compartido"
+      ? "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "?$select=owner"
+      : "https://graph.microsoft.com/v1.0/me/drive?$select=owner";
+    const rd = await fetch(urlDrive, { headers: { Authorization: "Bearer " + (await obtenerToken()) } });
     if (rd.ok) {
       const d = await rd.json();
       duenoOneDrive = (d.owner && d.owner.user && d.owner.user.displayName) || "";
+      if (duenoOneDrive && baseGraph.tipo === "compartido") duenoOneDrive += " (carpeta compartida)";
     }
   } catch {}
   await iniciarUI();
@@ -1153,29 +1196,37 @@ function calcIMC() {
 function nombreArchivoSeguro(nombre) {
   return String(nombre || "archivo").replace(/[\/\\:*?"<>|#%&{}$!'@+`=]/g, "_").slice(-120);
 }
-// Sube el archivo a OneDrive en <ruta>/Estudios/<id de consulta>/<nombre>
-async function crearCarpetaGraph(rutaPadre, nombreCarpeta, token) {
-  // 409 si ya existe: no importa
-  await fetch("https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(rutaPadre) + ":/children", {
+// Crea una subcarpeta relativa a Datos (409 si ya existe: no importa)
+async function crearCarpetaGraph(padreRel, nombreCarpeta, token) {
+  let url;
+  if (baseGraph.tipo === "compartido") {
+    const path = [baseGraph.resto, padreRel].filter(Boolean).join("/");
+    url = "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "/items/" + baseGraph.itemId
+      + (path ? ":/" + encodeURI(path) + ":" : "") + "/children";
+  } else {
+    const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
+    const path = [ruta, padreRel].filter(Boolean).join("/");
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(path) + ":/children";
+  }
+  await fetch(url, {
     method: "POST",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: JSON.stringify({ name: nombreCarpeta, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
   }).catch(() => {});
 }
+// Sube el archivo a <base>/Estudios/<id de consulta>/<nombre>
 async function subirEstudio(consultaId, archivo, nombre) {
   const token = await obtenerToken();
   if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
-  const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
-  const url = "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta)
-    + "/Estudios/" + encodeURIComponent(consultaId) + "/" + encodeURIComponent(nombre) + ":/content";
+  const url = urlGraphDe("Estudios/" + consultaId + "/" + nombre);
   const opciones = { method: "PUT",
     headers: { Authorization: "Bearer " + token, "Content-Type": archivo.type || "application/octet-stream" },
     body: archivo };
   let r = await fetch(url, opciones);
   if (r.status === 404) {
     // Las carpetas intermedias aún no existen: se crean y se reintenta una vez
-    await crearCarpetaGraph(ruta, "Estudios", token);
-    await crearCarpetaGraph(ruta + "/Estudios", consultaId, token);
+    await crearCarpetaGraph("", "Estudios", token);
+    await crearCarpetaGraph("Estudios", consultaId, token);
     r = await fetch(url, opciones);
   }
   if (!r.ok) throw new Error("OneDrive código " + r.status);
