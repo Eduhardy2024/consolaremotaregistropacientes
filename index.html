@@ -422,6 +422,7 @@ let consultas = [];
 let citaEditandoId = null;
 let pacienteEditandoId = null;
 let historiaPacienteId = null;
+let consultaEditandoId = null;   // id de la consulta que se está editando (null = nueva)
 let medsConsulta = [];
 
 const $ = (id) => document.getElementById(id);
@@ -1112,6 +1113,9 @@ function renderHistoria() {
         <b style="white-space:nowrap; flex-shrink:0">${fechaLarga(c.date)}</b>
         <span style="color:var(--gris); font-size:12px; white-space:nowrap; flex-shrink:0">Consulta ${escapar((c.visitType||"Seguimiento").toLowerCase())}</span>
         <span style="color:var(--gris); font-size:13px; margin-left:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">· ${resumen}</span>
+        <span style="flex:1"></span>
+        <button class="secundario" style="flex-shrink:0; padding:4px 10px; font-size:12px"
+          onclick="event.stopPropagation(); abrirModalConsulta('${c.id}')">✏️ Editar</button>
       </div>
       <div id="det${idx}" style="padding:${abierta?"10px 12px":"0 12px"}; display:${abierta?"block":"none"}">${detalle}</div>
     </div>`;
@@ -1140,26 +1144,50 @@ function fila(etq, val) {
 }
 
 // ---------- Nueva consulta ----------
-function abrirModalConsulta() {
+function abrirModalConsulta(idEditar) {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
   if (!p) { alert("Primero abre la historia de un paciente."); return; }
+  consultaEditandoId = idEditar || null;
+  const editando = idEditar ? consultas.find((c) => c.id === idEditar) : null;
+  $("tituloModalConsulta").textContent = editando ? "Editar consulta" : "Nueva consulta";
   const previas = consultas.filter((c) => c.patientId === p.id);
   $("consultaPaciente").textContent = "Paciente: " + p.name;
-  $("conFecha").value = hoy();
-  $("conTipo").value = previas.length ? "Seguimiento" : "Inicial";
   ["conMotivo","conSintomas","conExploracion","conDiagnostico","conPlan","conEstudios","conInterpretacion","conNotas","conMonto",
    "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
-  $("conPago").value = "efectivo";
   $("conArchivos").value = "";
-  // Traer signos vitales de la consulta anterior (editables)
-  const ant = previas.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
-  if (ant && ant.vitals) {
-    const v = ant.vitals;
+  if (editando) {
+    // Pre-llenar con la consulta existente
+    $("conFecha").value = String(editando.date || "").slice(0, 10);
+    $("conTipo").value = editando.visitType || "Seguimiento";
+    $("conMotivo").value = editando.reason || "";
+    $("conSintomas").value = editando.symptoms || "";
+    $("conExploracion").value = editando.physicalExam || "";
+    $("conDiagnostico").value = editando.diagnosis || "";
+    $("conPlan").value = editando.treatmentPlan || "";
+    $("conEstudios").value = editando.studies || "";
+    $("conInterpretacion").value = editando.studyInterpretation || "";
+    $("conNotas").value = editando.notes || "";
+    $("conPago").value = editando.paymentMethod || "efectivo";
+    $("conMonto").value = editando.amountPaid == null ? "" : editando.amountPaid;
+    const v = editando.vitals || {};
     $("svTA").value=v.ta||""; $("svFC").value=v.fc||""; $("svFR").value=v.fr||"";
     $("svTemp").value=v.temperatura||""; $("svPeso").value=v.peso||""; $("svTalla").value=v.talla||"";
     $("svSpO2").value=v.spo2||""; $("svGlucosa").value=v.glucosa||"";
+    medsConsulta = ((editando.prescription && editando.prescription.medications) || []).map((m) => ({ ...m }));
+  } else {
+    $("conFecha").value = hoy();
+    $("conTipo").value = previas.length ? "Seguimiento" : "Inicial";
+    $("conPago").value = "efectivo";
+    // Traer signos vitales de la consulta anterior (editables)
+    const ant = previas.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+    if (ant && ant.vitals) {
+      const v = ant.vitals;
+      $("svTA").value=v.ta||""; $("svFC").value=v.fc||""; $("svFR").value=v.fr||"";
+      $("svTemp").value=v.temperatura||""; $("svPeso").value=v.peso||""; $("svTalla").value=v.talla||"";
+      $("svSpO2").value=v.spo2||""; $("svGlucosa").value=v.glucosa||"";
+    }
+    medsConsulta = [];
   }
-  medsConsulta = [];
   dibujarMeds();
   calcIMC();
   $("modalConsulta").classList.add("visible");
@@ -1244,7 +1272,10 @@ async function guardarConsulta() {
     spo2:$("svSpO2").value.trim(), glucosa:$("svGlucosa").value.trim() };
   const vacio = Object.values(vitals).every((x) => !x);
   const monto = numDe($("conMonto").value);
-  const idConsulta = uuid();
+  const idConsulta = consultaEditandoId || uuid();
+  const adjuntosPrevios = consultaEditandoId
+    ? ((consultas.find((c) => c.id === consultaEditandoId) || {}).studyFiles || [])
+    : [];
   // Primero se suben los archivos de estudios; si alguno falla, no se guarda la
   // consulta (para no dejarla apuntando a archivos que no existen).
   const archivos = [...(($("conArchivos") && $("conArchivos").files) || [])];
@@ -1253,7 +1284,7 @@ async function guardarConsulta() {
     for (const archivo of archivos) {
       let nombre = nombreArchivoSeguro(archivo.name);
       let n = 2;
-      while (nombresSubidos.includes(nombre)) nombre = (n++) + "_" + nombreArchivoSeguro(archivo.name);
+      while (nombresSubidos.includes(nombre) || adjuntosPrevios.includes(nombre)) nombre = (n++) + "_" + nombreArchivoSeguro(archivo.name);
       await subirEstudio(idConsulta, archivo, nombre);
       nombresSubidos.push(nombre);
     }
@@ -1262,22 +1293,37 @@ async function guardarConsulta() {
       + "No se guardó la consulta; revisa la conexión e inténtalo de nuevo.");
     return;
   }
-  const nueva = {
-    id: idConsulta, patientId: p.id, date: $("conFecha").value,
+  const campos = {
+    date: $("conFecha").value,
     visitType: $("conTipo").value,
     reason: $("conMotivo").value.trim(), symptoms: $("conSintomas").value.trim(),
     diagnosis: $("conDiagnostico").value.trim(), notes: $("conNotas").value.trim(),
     prescription: meds.length ? { medications: meds } : null,
     studies: $("conEstudios").value.trim(), studyInterpretation: $("conInterpretacion").value.trim(),
-    requiresInvoice: false, confirmedRfc: "", confirmedTaxAddress: "",
     paymentMethod: $("conPago").value, amountPaid: monto,
     vitals: vacio ? null : vitals, physicalExam: $("conExploracion").value.trim(),
-    treatmentPlan: $("conPlan").value.trim(), studyFiles: nombresSubidos,
+    treatmentPlan: $("conPlan").value.trim(),
   };
+  // Releer justo antes de escribir, para no pisar cambios de otros
   const actuales = await leerJSON("consultas.json");
-  actuales.push(nueva);
+  if (consultaEditandoId) {
+    const i = actuales.findIndex((c) => c.id === consultaEditandoId);
+    if (i < 0) { alert("Esta consulta ya no existe en la base."); return; }
+    // Se conservan los campos que la consola no edita (facturación, etc.)
+    // y los archivos previos; los recién subidos se suman.
+    actuales[i] = { ...actuales[i], ...campos,
+      studyFiles: [...(actuales[i].studyFiles || []), ...nombresSubidos] };
+  } else {
+    actuales.push({
+      id: idConsulta, patientId: p.id,
+      requiresInvoice: false, confirmedRfc: "", confirmedTaxAddress: "",
+      studyFiles: nombresSubidos,
+      ...campos,
+    });
+  }
   await escribirJSON("consultas.json", actuales);
   consultas = actuales;
+  consultaEditandoId = null;
   $("modalConsulta").classList.remove("visible");
   renderHistoria();
 }
