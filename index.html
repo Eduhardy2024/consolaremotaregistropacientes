@@ -1116,7 +1116,7 @@ function renderHistoria() {
       ${svTxt ? fila("Signos vitales", svTxt) : ""}
       ${fila("Exploración", c.physicalExam)} ${fila("Diagnóstico", c.diagnosis)}
       ${fila("Plan", c.treatmentPlan)}
-      ${meds.length ? "<div style='margin-top:4px'><b>Receta:</b><ul style='margin:2px 0 0 18px'>" + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
+      ${meds.length ? `<div style="margin-top:9px"><div style="font-size:13.5px; font-weight:700">Receta</div><ul style="font-size:13px; margin:2px 0 0 30px">` + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
       ${fila("Estudios", c.studies)} ${fila("Interpretación", c.studyInterpretation)}
       ${(c.studyFiles && c.studyFiles.length) ? fila("Archivos adjuntos", c.studyFiles.join(", ")) : ""}
       ${fila("Notas", c.notes)}
@@ -1155,8 +1155,13 @@ function toggleConsulta(idx) {
   ch.textContent = abierta ? "▸" : "▾";
 }
 function fila(etq, val) {
+  // Etiqueta en negritas (un punto más grande) y el contenido con sangría
+  // debajo, conservando los saltos de línea (p. ej. la interpretación de IA).
   val = (val == null ? "" : String(val)).trim();
-  return val ? `<div style="font-size:13px; margin-top:2px"><span style="color:var(--gris)">${etq}:</span> ${escapar(val)}</div>` : "";
+  return val ? `<div style="margin-top:9px">
+    <div style="font-size:13.5px; font-weight:700">${etq}</div>
+    <div style="font-size:13px; margin:2px 0 0 14px; white-space:pre-wrap">${escapar(val)}</div>
+  </div>` : "";
 }
 
 // ---------- Nueva consulta ----------
@@ -1315,6 +1320,8 @@ async function guardarConsulta() {
   // Candado: guardar en la nube tarda unos segundos; un doble clic
   // duplicaba la consulta. Se ignoran clics mientras hay un guardado en curso.
   if (guardandoConsulta) return;
+  // Si el formulario ya se cerró (p. ej. un clic rezagado), no hay nada que guardar
+  if (!$("modalConsulta").classList.contains("visible")) return;
   guardandoConsulta = true;
   try {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
@@ -1328,9 +1335,10 @@ async function guardarConsulta() {
     spo2:$("svSpO2").value.trim(), glucosa:$("svGlucosa").value.trim() };
   const vacio = Object.values(vitals).every((x) => !x);
   const monto = numDe($("conMonto").value);
-  const idConsulta = consultaEditandoId || uuid();
-  const adjuntosPrevios = consultaEditandoId
-    ? ((consultas.find((c) => c.id === consultaEditandoId) || {}).studyFiles || [])
+  const editandoId = consultaEditandoId;   // se captura al inicio: los await no pueden cambiar la rama
+  const idConsulta = editandoId || uuid();
+  const adjuntosPrevios = editandoId
+    ? ((consultas.find((c) => c.id === editandoId) || {}).studyFiles || [])
     : [];
   // Primero se suben los archivos de estudios; si alguno falla, no se guarda la
   // consulta (para no dejarla apuntando a archivos que no existen).
@@ -1362,8 +1370,8 @@ async function guardarConsulta() {
   };
   // Releer justo antes de escribir, para no pisar cambios de otros
   const actuales = await leerJSON("consultas.json");
-  if (consultaEditandoId) {
-    const i = actuales.findIndex((c) => c.id === consultaEditandoId);
+  if (editandoId) {
+    const i = actuales.findIndex((c) => c.id === editandoId);
     if (i < 0) { alert("Esta consulta ya no existe en la base."); return; }
     // Se conservan los campos que la consola no edita (facturación, etc.)
     // y los archivos previos; los recién subidos se suman.
