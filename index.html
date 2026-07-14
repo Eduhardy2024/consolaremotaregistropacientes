@@ -723,6 +723,40 @@ function nombreDe(pacienteId) {
   const p = pacientes.find((x) => x.id === pacienteId);
   return p ? p.name : "(paciente eliminado)";
 }
+// Convierte el Markdown que genera la IA (**negritas**, viñetas, títulos,
+// numeración) en HTML limpio y legible. Escapa todo primero (seguro).
+function formatearInterpretacion(texto) {
+  const esc = (s) => escapar(s)
+    // negritas **...** o __...__
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/__([^_]+)__/g, "<b>$1</b>")
+    // cursivas *...* (evita chocar con viñetas: requiere texto pegado)
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<i>$2</i>");
+  const lineas = String(texto || "").replace(/\r/g, "").split("\n");
+  let html = "", enLista = null;   // "ul" | "ol" | null
+  const cerrar = () => { if (enLista) { html += "</" + enLista + ">"; enLista = null; } };
+  for (let cruda of lineas) {
+    let l = cruda.trim();
+    if (!l) { cerrar(); continue; }
+    // Títulos Markdown (#, ##, ###)
+    const th = l.match(/^#{1,6}\s+(.*)$/);
+    if (th) { cerrar(); html += `<div style="font-weight:700; margin:10px 0 3px">${esc(th[1].replace(/[:*]+$/,""))}</div>`; continue; }
+    // Viñetas: *, -, •
+    const vi = l.match(/^[*\-•]\s+(.*)$/);
+    if (vi) { if (enLista !== "ul") { cerrar(); html += '<ul style="margin:3px 0 3px 20px">'; enLista = "ul"; } html += `<li>${esc(vi[1])}</li>`; continue; }
+    // Numeradas: 1. 2) etc. — se conserva el número original del texto
+    const nu = l.match(/^(\d+)[.)]\s+(.*)$/);
+    if (nu) { cerrar(); html += `<div style="margin:3px 0 3px 8px; padding-left:18px; text-indent:-18px"><b>${nu[1]}.</b> ${esc(nu[2])}</div>`; continue; }
+    // Renglón que es solo un título en negritas seguido de dos puntos
+    const soloTitulo = l.match(/^\*\*(.+?):\*\*$/);
+    if (soloTitulo) { cerrar(); html += `<div style="font-weight:700; margin:10px 0 3px">${esc(soloTitulo[1])}:</div>`; continue; }
+    cerrar();
+    html += `<div style="margin:3px 0">${esc(l)}</div>`;
+  }
+  cerrar();
+  return html;
+}
+
 function escapar(t) {
   return String(t ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1126,12 +1160,17 @@ function renderHistoria() {
       ${fila("Plan", c.treatmentPlan)}
       ${meds.length ? `<div style="margin-top:9px"><div style="font-size:13.5px; font-weight:700">Receta</div><ul style="font-size:13px; margin:2px 0 0 30px">` + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
       ${fila("Estudios", c.studies)}
-      ${(c.studyFiles && c.studyFiles.length) ? fila("Archivos adjuntos", c.studyFiles.join(", ")) : ""}
+      ${(c.studyFiles && c.studyFiles.length) ? `<div style="margin-top:9px">
+        <div style="font-size:13px; font-weight:700">Archivos adjuntos</div>
+        <div style="font-size:13px; margin:2px 0 0 14px">` +
+        c.studyFiles.map((n) => `<a href="#" onclick="verEstudio('${c.id}', '${encodeURIComponent(n)}'); return false"
+          style="color:var(--azul); display:inline-block; margin:2px 12px 2px 0; text-decoration:none">📄 ${escapar(n)}</a>`).join("") +
+        `</div></div>` : ""}
       ${fila("Notas", c.notes)}
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}
       ${(c.studyInterpretation || "").trim() ? `<details style="margin-top:12px; border-top:1px solid var(--borde); padding-top:8px">
         <summary style="font-size:13px; font-weight:700; cursor:pointer">✨ ${escapar(tituloInterpretacion(c))} (IA) — mostrar / ocultar</summary>
-        <div style="font-size:13px; margin:6px 0 0 14px; white-space:pre-wrap">${escapar(c.studyInterpretation)}</div>
+        <div style="font-size:13px; margin:6px 0 0 14px; line-height:1.45">${formatearInterpretacion(c.studyInterpretation)}</div>
       </details>` : ""}`;
     html += `<div style="border:1px solid var(--borde); border-radius:10px; margin-bottom:10px; overflow:hidden">
       <div onclick="toggleConsulta(${idx})" style="cursor:pointer; padding:10px 12px; background:var(--fondo); display:flex; align-items:center; gap:8px">
@@ -1291,6 +1330,24 @@ async function subirEstudio(consultaId, archivo, nombre) {
     r = await fetch(url, opciones);
   }
   if (!r.ok) throw new Error("OneDrive código " + r.status);
+}
+
+// Abre un archivo de estudios en otra pestaña (imagen o PDF), desde OneDrive
+async function verEstudio(consultaId, nombreCodificado) {
+  const nombre = decodeURIComponent(nombreCodificado);
+  // La pestaña se abre ANTES de las esperas, para que el navegador no la bloquee
+  const ventana = window.open("", "_blank");
+  try {
+    const token = await obtenerToken();
+    if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
+    const r = await fetch(urlGraphDe("Estudios/" + consultaId + "/" + nombre),
+      { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) throw new Error("OneDrive código " + r.status);
+    ventana.location = URL.createObjectURL(await r.blob());
+  } catch (e) {
+    if (ventana) ventana.close();
+    alert("No se pudo abrir el archivo: " + e.message);
+  }
 }
 
 // Elimina la consulta (y sus archivos de estudios) previa confirmación
