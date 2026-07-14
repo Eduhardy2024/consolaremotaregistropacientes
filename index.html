@@ -1171,6 +1171,8 @@ function tituloInterpretacion(c) {
 async function imprimirDocumento(consultaId, tipo) {
   const c = consultas.find((x) => x.id === consultaId);
   if (!c) return;
+  const etiqueta = tipo === "receta" ? "receta" : "solicitud de estudios";
+  const conFirma = confirm("¿Generar la " + etiqueta + " CON tu firma digital?\n\n• Aceptar = con firma\n• Cancelar = sin firma (para firmar a mano)");
   const p = pacientes.find((x) => x.id === c.patientId) || {};
   let mem = {};
   try { const raw = await leerJSON("membrete.json"); if (raw && !Array.isArray(raw)) mem = raw; } catch {}
@@ -1178,7 +1180,8 @@ async function imprimirDocumento(consultaId, tipo) {
   const especialidad = mem.especialidad || "";
   const bIzq = mem.bloqueIzquierdo || "";
   const bDer = mem.bloqueDerecho || "";
-  const firma = mem.firmaDataURL || "";
+  let firma = conFirma ? (mem.firmaDataURL || "") : "";
+  if (conFirma && !firma) alert("No hay una firma digital guardada. Se generará sin firma; súbela en la app de la doctora (Excel y Datos → Membrete) si la necesitas.");
   const fecha = fechaLarga(c.date);
   const edad = edadDe(p.birthDate);
 
@@ -1212,7 +1215,7 @@ async function imprimirDocumento(consultaId, tipo) {
       ol { font-size: 13.5px; line-height: 1.5; padding-left: 22px; }
       li { margin-bottom: 6px; }
       .firma { margin-top: 70px; text-align: center; }
-      .firma img { height: 70px; object-fit: contain; }
+      .firma img { height: 120px; object-fit: contain; }
       .firma .linea { border-top: 1px solid #333; width: 260px; margin: 4px auto 0; padding-top: 3px; font-size: 12px; }
       @media print { .noimprimir { display: none; } }
     </style></head>
@@ -1220,6 +1223,7 @@ async function imprimirDocumento(consultaId, tipo) {
       <div class="noimprimir" style="background:#eef; padding:8px 12px; font-size:13px; text-align:center">
         Se abrirá el cuadro de impresión. Elige <b>«Guardar como PDF»</b> o tu impresora.
         <button onclick="window.print()">Imprimir de nuevo</button>
+        <button onclick="window.close()">Cerrar ventana</button>
       </div>
       <div style="padding: 4px 2px">
         <div class="nombre">${escapar(nombre)}<span class="esp">${escapar(especialidad)}</span></div>
@@ -1230,12 +1234,13 @@ async function imprimirDocumento(consultaId, tipo) {
         <h2>${escapar(titulo)}</h2>
         ${cuerpo}
         <div class="firma">
-          ${firma ? '<img src="' + firma + '"><div class="linea">' + escapar(nombre) + "</div>" : '<div class="linea">' + escapar(nombre) + "</div>"}
+          ${firma ? '<img src="' + firma + '">' : '<div style="height:90px"></div>'}
+          <div class="linea">${escapar(nombre)}</div>
         </div>
       </div>
     </body></html>`;
 
-  const w = window.open("", "_blank");
+  const w = window.open("", "_blank", "width=850,height=1100");
   if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
   w.document.open(); w.document.write(doc); w.document.close();
 }
