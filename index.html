@@ -61,6 +61,16 @@
   .modal-fondo.visible { display: flex; }
   /* "Editar paciente" puede abrirse encima de la historia clínica: va en una capa superior */
   #modalPaciente { z-index: 60; }
+
+  /* ---------- Visor de archivos de estudios (galería a pantalla completa) ---------- */
+  #visorEstudios { position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 80; display: none; flex-direction: column; }
+  #visorEstudios.visible { display: flex; }
+  #visorEstudios .barra { display: flex; align-items: center; gap: 14px; color: #fff; padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top)); }
+  #visorEstudios .barra a, #visorEstudios .barra button { color: #fff; background: none; border: none; cursor: pointer; font-size: 20px; text-decoration: none; }
+  #visorEstudios .cuerpo { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 0 8px 12px; }
+  #visorEstudios .flecha { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.15); color: #fff; border: none; font-size: 30px; width: 52px; height: 76px; border-radius: 10px; cursor: pointer; z-index: 2; }
+  #visorEstudios .flecha:hover { background: rgba(255,255,255,.32); }
+  #visorContenido { max-width: 100%; max-height: 100%; display: flex; align-items: center; justify-content: center; }
   .modal { background: white; border-radius: 14px; padding: 22px; width: 520px; max-width: 94vw;
            max-height: 90vh; overflow-y: auto; }
   .modal h2 { font-size: 17px; margin-bottom: 14px; }
@@ -227,6 +237,21 @@
   </div>
 </div>
 </div><!-- /main -->
+
+<!-- ===================== VISOR DE ARCHIVOS DE ESTUDIOS ===================== -->
+<div id="visorEstudios">
+  <div class="barra">
+    <span id="visorNombre" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
+    <span id="visorContador" style="opacity:.8; font-size:14px"></span>
+    <a id="visorDescargar" href="#" target="_blank" title="Abrir en pestaña / descargar">⬇︎</a>
+    <button onclick="cerrarVisor()" title="Cerrar (Esc)">✕</button>
+  </div>
+  <div class="cuerpo">
+    <button class="flecha" style="left:10px" onclick="visorMover(-1)" title="Anterior (←)">‹</button>
+    <div id="visorContenido"></div>
+    <button class="flecha" style="right:10px" onclick="visorMover(1)" title="Siguiente (→)">›</button>
+  </div>
+</div>
 
 <!-- ===================== MODAL CITA ===================== -->
 <div class="modal-fondo" id="modalCita">
@@ -1136,6 +1161,79 @@ function tituloInterpretacion(c) {
   if (t.length > 48) t = t.slice(0, 48) + "…";
   return "Interpretación: " + t + (lineas.length > 1 ? " (+" + (lineas.length - 1) + " más)" : "");
 }
+// ---------- Receta y solicitud de estudios en PDF (ventana de impresión) ----------
+async function imprimirDocumento(consultaId, tipo) {
+  const c = consultas.find((x) => x.id === consultaId);
+  if (!c) return;
+  const p = pacientes.find((x) => x.id === c.patientId) || {};
+  let mem = {};
+  try { const raw = await leerJSON("membrete.json"); if (raw && !Array.isArray(raw)) mem = raw; } catch {}
+  const nombre = mem.nombre || "";
+  const especialidad = mem.especialidad || "";
+  const bIzq = mem.bloqueIzquierdo || "";
+  const bDer = mem.bloqueDerecho || "";
+  const firma = mem.firmaDataURL || "";
+  const fecha = fechaLarga(c.date);
+  const edad = edadDe(p.birthDate);
+
+  let cuerpo = "", titulo = "";
+  if (tipo === "receta") {
+    titulo = "Receta médica";
+    const meds = (c.prescription && c.prescription.medications) || [];
+    cuerpo = "<ol>" + meds.map((m) => "<li><b>" + escapar(m.name) + "</b> " + escapar(m.dosage||"")
+      + (m.frequency ? " — cada " + escapar(m.frequency) : "")
+      + (m.duration ? " por " + escapar(m.duration) : "")
+      + (m.notes ? "<br><span style='color:#444'>" + escapar(m.notes) + "</span>" : "") + "</li>").join("") + "</ol>";
+  } else {
+    titulo = "Solicitud de estudios de laboratorio y gabinete";
+    const est = String(c.studies || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    cuerpo = "<ol>" + est.map((e) => "<li>" + escapar(e) + "</li>").join("") + "</ol>";
+  }
+
+  const doc = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${escapar(titulo)}</title>
+    <style>
+      @page { margin: 1.6cm; }
+      * { box-sizing: border-box; }
+      body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+      .nombre { font-size: 20px; font-weight: 800; }
+      .esp { font-size: 12px; color: #333; font-weight: 500; margin-left: 6px; }
+      .cols { display: flex; justify-content: space-between; gap: 20px; font-size: 10.5px; color: #333; margin-top: 4px; }
+      .cols div { white-space: pre-line; }
+      hr { border: none; border-top: 1px solid #333; margin: 10px 0 12px; }
+      .datos { font-size: 13px; margin-bottom: 8px; }
+      .datos b { font-weight: 700; }
+      h2 { font-size: 15px; margin: 16px 0 6px; }
+      ol { font-size: 13.5px; line-height: 1.5; padding-left: 22px; }
+      li { margin-bottom: 6px; }
+      .firma { margin-top: 70px; text-align: center; }
+      .firma img { height: 70px; object-fit: contain; }
+      .firma .linea { border-top: 1px solid #333; width: 260px; margin: 4px auto 0; padding-top: 3px; font-size: 12px; }
+      @media print { .noimprimir { display: none; } }
+    </style></head>
+    <body onload="setTimeout(function(){ window.focus(); window.print(); }, 350)">
+      <div class="noimprimir" style="background:#eef; padding:8px 12px; font-size:13px; text-align:center">
+        Se abrirá el cuadro de impresión. Elige <b>«Guardar como PDF»</b> o tu impresora.
+        <button onclick="window.print()">Imprimir de nuevo</button>
+      </div>
+      <div style="padding: 4px 2px">
+        <div class="nombre">${escapar(nombre)}<span class="esp">${escapar(especialidad)}</span></div>
+        <div class="cols"><div>${escapar(bIzq)}</div><div>${escapar(bDer)}</div></div>
+        <hr>
+        <div class="datos"><b>Fecha:</b> ${escapar(fecha)}</div>
+        <div class="datos"><b>Paciente:</b> ${escapar(p.name || "")}${edad ? " &nbsp;·&nbsp; <b>Edad:</b> " + escapar(edad) : ""}${p.rutOrId ? " &nbsp;·&nbsp; <b>RFC:</b> " + escapar(p.rutOrId) : ""}</div>
+        <h2>${escapar(titulo)}</h2>
+        ${cuerpo}
+        <div class="firma">
+          ${firma ? '<img src="' + firma + '"><div class="linea">' + escapar(nombre) + "</div>" : '<div class="linea">' + escapar(nombre) + "</div>"}
+        </div>
+      </div>
+    </body></html>`;
+
+  const w = window.open("", "_blank");
+  if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+}
+
 function renderHistoria() {
   const cons = consultas
     .filter((c) => c.patientId === historiaPacienteId)
@@ -1163,11 +1261,15 @@ function renderHistoria() {
       ${(c.studyFiles && c.studyFiles.length) ? `<div style="margin-top:9px">
         <div style="font-size:13px; font-weight:700">Archivos adjuntos</div>
         <div style="font-size:13px; margin:2px 0 0 14px">` +
-        c.studyFiles.map((n) => `<a href="#" onclick="verEstudio('${c.id}', '${encodeURIComponent(n)}'); return false"
+        c.studyFiles.map((n, i) => `<a href="#" onclick="abrirVisor('${c.id}', ${i}); return false"
           style="color:var(--azul); display:inline-block; margin:2px 12px 2px 0; text-decoration:none">📄 ${escapar(n)}</a>`).join("") +
         `</div></div>` : ""}
       ${fila("Notas", c.notes)}
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}
+      ${(() => { const m = (c.prescription && c.prescription.medications) || []; const est = String(c.studies||"").split("\n").filter(s=>s.trim()); const b = [];
+        if (m.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','receta')">🖨️ Receta (PDF)</button>`);
+        if (est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','estudios')">🖨️ Solicitud de estudios (PDF)</button>`);
+        return b.length ? `<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">${b.join("")}</div>` : ""; })()}
       ${(c.studyInterpretation || "").trim() ? `<details style="margin-top:12px; border-top:1px solid var(--borde); padding-top:8px">
         <summary style="font-size:13px; font-weight:700; cursor:pointer">✨ ${escapar(tituloInterpretacion(c))} (IA) — mostrar / ocultar</summary>
         <div style="font-size:13px; margin:6px 0 0 14px; line-height:1.45">${formatearInterpretacion(c.studyInterpretation)}</div>
@@ -1332,23 +1434,62 @@ async function subirEstudio(consultaId, archivo, nombre) {
   if (!r.ok) throw new Error("OneDrive código " + r.status);
 }
 
-// Abre un archivo de estudios en otra pestaña (imagen o PDF), desde OneDrive
-async function verEstudio(consultaId, nombreCodificado) {
-  const nombre = decodeURIComponent(nombreCodificado);
-  // La pestaña se abre ANTES de las esperas, para que el navegador no la bloquee
-  const ventana = window.open("", "_blank");
+// Devuelve una URL usable en <img>/<iframe> para un archivo de estudios (OneDrive)
+async function urlDeEstudio(consultaId, nombre) {
+  const token = await obtenerToken();
+  if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
+  const r = await fetch(urlGraphDe("Estudios/" + consultaId + "/" + nombre),
+    { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) throw new Error("OneDrive código " + r.status);
+  return URL.createObjectURL(await r.blob());
+}
+// ---------- Visor de archivos de estudios (galería con flechas) ----------
+let visorArchivos = [], visorIndice = 0, visorConsultaId = null, visorURL = null;
+function abrirVisor(consultaId, indice) {
+  const c = consultas.find((x) => x.id === consultaId);
+  visorArchivos = (c && c.studyFiles) || [];
+  if (!visorArchivos.length) return;
+  visorConsultaId = consultaId;
+  visorIndice = indice || 0;
+  $("visorEstudios").classList.add("visible");
+  mostrarVisor();
+}
+async function mostrarVisor() {
+  const nombre = visorArchivos[visorIndice];
+  $("visorNombre").textContent = nombre;
+  $("visorContador").textContent = (visorIndice + 1) + " / " + visorArchivos.length;
+  const cont = $("visorContenido");
+  cont.innerHTML = '<div style="color:#fff; opacity:.8">Cargando…</div>';
+  if (visorURL) { URL.revokeObjectURL(visorURL); visorURL = null; }
   try {
-    const token = await obtenerToken();
-    if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
-    const r = await fetch(urlGraphDe("Estudios/" + consultaId + "/" + nombre),
-      { headers: { Authorization: "Bearer " + token } });
-    if (!r.ok) throw new Error("OneDrive código " + r.status);
-    ventana.location = URL.createObjectURL(await r.blob());
+    const url = await urlDeEstudio(visorConsultaId, nombre);
+    if (url.indexOf("blob:") === 0) visorURL = url;
+    $("visorDescargar").href = url;
+    if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(nombre)) {
+      cont.innerHTML = '<img src="' + url + '" style="max-width:100%; max-height:100%; object-fit:contain">';
+    } else {
+      cont.innerHTML = '<iframe src="' + url + '" style="width:100%; height:100%; border:none; background:#fff"></iframe>';
+    }
   } catch (e) {
-    if (ventana) ventana.close();
-    alert("No se pudo abrir el archivo: " + e.message);
+    cont.innerHTML = '<div style="color:#fff">No se pudo abrir el archivo (' + (e.message || "") + ").</div>";
   }
 }
+function visorMover(d) {
+  if (visorArchivos.length < 2) return;
+  visorIndice = (visorIndice + d + visorArchivos.length) % visorArchivos.length;
+  mostrarVisor();
+}
+function cerrarVisor() {
+  $("visorEstudios").classList.remove("visible");
+  if (visorURL) { URL.revokeObjectURL(visorURL); visorURL = null; }
+}
+document.addEventListener("keydown", (e) => {
+  if (!$("visorEstudios").classList.contains("visible")) return;
+  if (e.key === "ArrowLeft") visorMover(-1);
+  else if (e.key === "ArrowRight") visorMover(1);
+  else if (e.key === "Escape") cerrarVisor();
+});
+
 
 // Elimina la consulta (y sus archivos de estudios) previa confirmación
 async function eliminarConsulta(id) {
