@@ -1167,12 +1167,39 @@ function tituloInterpretacion(c) {
   if (t.length > 48) t = t.slice(0, 48) + "…";
   return "Interpretación: " + t + (lineas.length > 1 ? " (+" + (lineas.length - 1) + " más)" : "");
 }
+// Pregunta con dos botones si el documento va con firma o sin firma.
+// Devuelve true (con), false (sin) o null (canceló).
+function preguntarFirma(etiqueta) {
+  return new Promise((resolve) => {
+    const fondo = document.createElement("div");
+    fondo.className = "modal-fondo visible";
+    fondo.style.zIndex = "90";
+    fondo.innerHTML = `<div class="modal" style="width:430px; text-align:center">
+      <h2 style="margin-bottom:6px">Generar ${escapar(etiqueta)}</h2>
+      <p style="color:var(--gris); margin-bottom:16px">¿Cómo quieres el documento?</p>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap">
+        <button class="primario" data-r="con">✍️ Con firma</button>
+        <button class="secundario" data-r="sin">Sin firma (firmar a mano)</button>
+      </div>
+      <div style="margin-top:14px"><button class="peligro" data-r="cancel">Cancelar</button></div>
+    </div>`;
+    document.body.appendChild(fondo);
+    const cerrar = (v) => { fondo.remove(); resolve(v); };
+    fondo.querySelector('[data-r="con"]').onclick = () => cerrar(true);
+    fondo.querySelector('[data-r="sin"]').onclick = () => cerrar(false);
+    fondo.querySelector('[data-r="cancel"]').onclick = () => cerrar(null);
+    fondo.addEventListener("mousedown", (e) => { if (e.target === fondo) cerrar(null); });
+  });
+}
+
 // ---------- Receta y solicitud de estudios en PDF (ventana de impresión) ----------
 async function imprimirDocumento(consultaId, tipo) {
   const c = consultas.find((x) => x.id === consultaId);
   if (!c) return;
   const etiqueta = tipo === "receta" ? "receta" : "solicitud de estudios";
-  const conFirma = confirm("¿Generar la " + etiqueta + " CON tu firma digital?\n\n• Aceptar = con firma\n• Cancelar = sin firma (para firmar a mano)");
+  const eleccion = await preguntarFirma(etiqueta);
+  if (eleccion === null) return;   // canceló
+  const conFirma = eleccion;
   const p = pacientes.find((x) => x.id === c.patientId) || {};
   let mem = {};
   try { const raw = await leerJSON("membrete.json"); if (raw && !Array.isArray(raw)) mem = raw; } catch {}
@@ -1215,7 +1242,7 @@ async function imprimirDocumento(consultaId, tipo) {
       ol { font-size: 13.5px; line-height: 1.5; padding-left: 22px; }
       li { margin-bottom: 6px; }
       .firma { margin-top: 70px; text-align: center; }
-      .firma img { height: 120px; object-fit: contain; }
+      .firma img { height: 120px; object-fit: contain; display: block; margin: 0 auto -22px; }
       .firma .linea { border-top: 1px solid #333; width: 260px; margin: 4px auto 0; padding-top: 3px; font-size: 12px; }
       @media print { .noimprimir { display: none; } }
     </style></head>
