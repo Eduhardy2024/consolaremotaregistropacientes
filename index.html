@@ -243,6 +243,12 @@
   <div class="barra">
     <span id="visorNombre" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
     <span id="visorContador" style="opacity:.8; font-size:14px"></span>
+    <span id="visorZoomCtrl" style="display:none; align-items:center; gap:4px; margin-right:6px">
+      <button onclick="visorZoomSet(visorZoom - 0.5)" title="Alejar" style="font-size:16px">➖</button>
+      <span id="visorZoomLabel" style="font-size:13px; min-width:70px; text-align:center">Ajustado</span>
+      <button onclick="visorZoomSet(visorZoom + 0.5)" title="Acercar" style="font-size:16px">➕</button>
+      <button onclick="visorAjustar()" title="Ajustar a pantalla" style="font-size:16px">⤢</button>
+    </span>
     <a id="visorDescargar" href="#" target="_blank" title="Abrir en pestaña / descargar">⬇︎</a>
     <button onclick="cerrarVisor()" title="Cerrar (Esc)">✕</button>
   </div>
@@ -1445,6 +1451,32 @@ async function urlDeEstudio(consultaId, nombre) {
 }
 // ---------- Visor de archivos de estudios (galería con flechas) ----------
 let visorArchivos = [], visorIndice = 0, visorConsultaId = null, visorURL = null;
+let visorZoom = 1, visorPanX = 0, visorPanY = 0, visorEsImagen = false;
+function visorAplicar() {
+  const im = document.querySelector("#visorContenido img");
+  if (im) im.style.transform = "translate(" + visorPanX + "px," + visorPanY + "px) scale(" + visorZoom + ")";
+}
+function visorZoomSet(z) {
+  visorZoom = Math.min(8, Math.max(1, Math.round(z * 10) / 10));
+  if (visorZoom === 1) { visorPanX = 0; visorPanY = 0; }
+  $("visorZoomLabel").textContent = visorZoom === 1 ? "Ajustado" : Math.round(visorZoom * 100) + "%";
+  const c = $("visorContenido"); if (c) c.style.cursor = visorZoom > 1 ? "grab" : "zoom-in";
+  visorAplicar();
+}
+function visorAjustar() { visorZoomSet(1); }
+(function () {
+  const c = $("visorContenido"); if (!c) return;
+  c.addEventListener("wheel", (e) => { if (!visorEsImagen) return; e.preventDefault(); visorZoomSet(visorZoom + (e.deltaY < 0 ? 0.3 : -0.3)); }, { passive: false });
+  c.addEventListener("dblclick", () => { if (visorEsImagen) visorZoomSet(visorZoom > 1 ? 1 : 2.5); });
+  let arr = false, ax = 0, ay = 0;
+  c.addEventListener("pointerdown", (e) => { if (!visorEsImagen || visorZoom <= 1) return; arr = true; ax = e.clientX - visorPanX; ay = e.clientY - visorPanY; c.style.cursor = "grabbing"; });
+  window.addEventListener("pointermove", (e) => { if (!arr) return; visorPanX = e.clientX - ax; visorPanY = e.clientY - ay; visorAplicar(); });
+  window.addEventListener("pointerup", () => { if (arr) { arr = false; if (c) c.style.cursor = visorZoom > 1 ? "grab" : "zoom-in"; } });
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  let pd = 0, pz = 1;
+  c.addEventListener("touchstart", (e) => { if (visorEsImagen && e.touches.length === 2) { pd = dist(e.touches); pz = visorZoom; } }, { passive: false });
+  c.addEventListener("touchmove", (e) => { if (visorEsImagen && e.touches.length === 2 && pd) { e.preventDefault(); visorZoomSet(pz * dist(e.touches) / pd); } }, { passive: false });
+})();
 function abrirVisor(consultaId, indice) {
   const c = consultas.find((x) => x.id === consultaId);
   visorArchivos = (c && c.studyFiles) || [];
@@ -1465,9 +1497,17 @@ async function mostrarVisor() {
     const url = await urlDeEstudio(visorConsultaId, nombre);
     if (url.indexOf("blob:") === 0) visorURL = url;
     $("visorDescargar").href = url;
+    visorZoom = 1; visorPanX = 0; visorPanY = 0;
+    if ($("visorZoomLabel")) $("visorZoomLabel").textContent = "Ajustado";
     if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(nombre)) {
-      cont.innerHTML = '<img src="' + url + '" style="max-width:100%; max-height:100%; object-fit:contain">';
+      visorEsImagen = true;
+      $("visorZoomCtrl").style.display = "inline-flex";
+      cont.style.cursor = "zoom-in";
+      cont.innerHTML = '<img src="' + url + '" style="max-width:100%; max-height:100%; object-fit:contain; transform-origin:center; will-change:transform">';
     } else {
+      visorEsImagen = false;
+      $("visorZoomCtrl").style.display = "none";
+      cont.style.cursor = "default";
       cont.innerHTML = '<iframe src="' + url + '" style="width:100%; height:100%; border:none; background:#fff"></iframe>';
     }
   } catch (e) {
