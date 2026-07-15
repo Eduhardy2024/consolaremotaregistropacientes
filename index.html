@@ -249,6 +249,7 @@
       <button onclick="visorZoomSet(visorZoom + 0.5)" title="Acercar" style="font-size:16px">➕</button>
       <button onclick="visorAjustar()" title="Ajustar a pantalla" style="font-size:16px">⤢</button>
     </span>
+    <button onclick="visorEliminar()" title="Eliminar este archivo">🗑</button>
     <a id="visorDescargar" href="#" target="_blank" title="Abrir en pestaña / descargar">⬇︎</a>
     <button onclick="cerrarVisor()" title="Cerrar (Esc)">✕</button>
   </div>
@@ -1483,7 +1484,7 @@ async function urlDeEstudio(consultaId, nombre) {
 }
 // ---------- Visor de archivos de estudios (galería con flechas) ----------
 let visorArchivos = [], visorIndice = 0, visorConsultaId = null, visorURL = null;
-let visorZoom = 1, visorPanX = 0, visorPanY = 0, visorEsImagen = false;
+let visorZoom = 1, visorPanX = 0, visorPanY = 0, visorEsImagen = false, visorToken = 0;
 function visorAplicar() {
   const im = document.querySelector("#visorContenido img");
   if (im) im.style.transform = "translate(" + visorPanX + "px," + visorPanY + "px) scale(" + visorZoom + ")";
@@ -1509,6 +1510,95 @@ function visorAjustar() { visorZoomSet(1); }
   c.addEventListener("touchstart", (e) => { if (visorEsImagen && e.touches.length === 2) { pd = dist(e.touches); pz = visorZoom; } }, { passive: false });
   c.addEventListener("touchmove", (e) => { if (visorEsImagen && e.touches.length === 2 && pd) { e.preventDefault(); visorZoomSet(pz * dist(e.touches) / pd); } }, { passive: false });
 })();
+// Renderiza el PDF completo (todas las páginas, con scroll) usando PDF.js.
+// Si no se puede cargar la librería (sin internet), usa el visor del navegador.
+let _pdfjs = null;
+async function cargarPdfjs() {
+  if (_pdfjs) return _pdfjs;
+  const lib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs");
+  lib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+  _pdfjs = lib;
+  return lib;
+}
+function conTiempo(promesa, ms) {
+  return Promise.race([promesa, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+}
+function pintarPagina(page, wrap) {
+  const vp = page.getViewport({ scale: 1.6 });
+  const canvas = document.createElement("canvas");
+  canvas.width = vp.width; canvas.height = vp.height;
+  canvas.style.cssText = "max-width:96%; height:auto; background:#fff; margin:8px auto; display:block; box-shadow:0 2px 12px rgba(0,0,0,.45);";
+  wrap.appendChild(canvas);
+  return conTiempo(page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise, 8000);
+}
+async function renderPDF(url, cont, token) {
+  cont.innerHTML = '<div style="color:#fff; opacity:.8; padding:20px">Cargando PDF…</div>';
+  const alVisorDelNavegador = () => { if (token === visorToken) cont.innerHTML = '<iframe src="' + url + '" style="width:100%; height:100%; border:none; background:#fff"></iframe>'; };
+  let pdf, wrap;
+  try {
+    const lib = await conTiempo(cargarPdfjs(), 8000);
+    const datos = await (await fetch(url)).arrayBuffer();
+    if (token !== visorToken) return;
+    pdf = await conTiempo(lib.getDocument({ data: datos }).promise, 8000);
+    if (token !== visorToken) return;
+    wrap = document.createElement("div");
+    wrap.style.cssText = "width:100%; height:100%; overflow:auto; -webkit-overflow-scrolling:touch; text-align:center; padding:8px 0;";
+    // La primera página con control de tiempo: si no aparece pronto, se usa el
+    // visor del navegador (evita que se quede colgado).
+    const p1 = await conTiempo(pdf.getPage(1), 6000);
+    if (token !== visorToken) return;
+    cont.innerHTML = ""; cont.appendChild(wrap);
+    await pintarPagina(p1, wrap);
+  } catch (e) {
+    alVisorDelNavegador();
+    return;
+  }
+  // Resto de las páginas (si alguna fallara, se conservan las ya pintadas)
+  for (let n = 2; n <= pdf.numPages; n++) {
+    if (token !== visorToken) return;
+    try { await pintarPagina(await pdf.getPage(n), wrap); } catch (e) { /* deja lo ya pintado */ }
+  }
+}
+
+// Elimina el archivo que se está viendo (de la consulta y del almacenamiento)
+async function visorEliminar() {
+  const nombre = visorArchivos[visorIndice];
+  if (!confirm('¿Eliminar el archivo "' + nombre + '"? Esta acción no se puede deshacer.')) return;
+  try {
+    const actuales = await leerJSON("consultas.json");
+    const i = actuales.findIndex((c) => c.id === visorConsultaId);
+    if (i >= 0) {
+      actuales[i].studyFiles = (actuales[i].studyFiles || []).filter((n) => n !== nombre);
+      await escribirJSON("consultas.json", actuales);
+      consultas = actuales;
+    }
+  } catch (e) {
+    alert("No se pudo actualizar la consulta: " + (e.message || "")); return;
+  }
+  try { await borrarUnEstudio(visorConsultaId, nombre); } catch {}
+  visorArchivos = visorArchivos.filter((n) => n !== nombre);
+  renderHistoria();
+  if (!visorArchivos.length) { cerrarVisor(); return; }
+  if (visorIndice >= visorArchivos.length) visorIndice = visorArchivos.length - 1;
+  mostrarVisor();
+}
+
+// Borra un archivo de estudios de OneDrive
+async function borrarUnEstudio(consultaId, nombre) {
+  const token = await obtenerToken();
+  if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
+  let url;
+  if (baseGraph.tipo === "compartido") {
+    const path = [baseGraph.resto, "Estudios/" + consultaId + "/" + nombre].filter(Boolean).join("/");
+    url = "https://graph.microsoft.com/v1.0/drives/" + baseGraph.driveId + "/items/" + baseGraph.itemId + ":/" + encodeURI(path);
+  } else {
+    const ruta = cfgLeer("ruta", RUTA_DEFECTO).replace(/^\/+|\/+$/g, "");
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/" + encodeURI(ruta + "/Estudios/" + consultaId + "/" + nombre);
+  }
+  const r = await fetch(url, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
+  if (!r.ok && r.status !== 404) throw new Error("OneDrive código " + r.status);
+}
+
 function abrirVisor(consultaId, indice) {
   const c = consultas.find((x) => x.id === consultaId);
   visorArchivos = (c && c.studyFiles) || [];
@@ -1520,6 +1610,7 @@ function abrirVisor(consultaId, indice) {
 }
 async function mostrarVisor() {
   const nombre = visorArchivos[visorIndice];
+  const token = ++visorToken;
   $("visorNombre").textContent = nombre;
   $("visorContador").textContent = (visorIndice + 1) + " / " + visorArchivos.length;
   const cont = $("visorContenido");
@@ -1540,7 +1631,7 @@ async function mostrarVisor() {
       visorEsImagen = false;
       $("visorZoomCtrl").style.display = "none";
       cont.style.cursor = "default";
-      cont.innerHTML = '<iframe src="' + url + '" style="width:100%; height:100%; border:none; background:#fff"></iframe>';
+      renderPDF(url, cont, token);
     }
   } catch (e) {
     cont.innerHTML = '<div style="color:#fff">No se pudo abrir el archivo (' + (e.message || "") + ").</div>";
