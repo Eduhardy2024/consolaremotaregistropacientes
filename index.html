@@ -297,7 +297,7 @@
     <h2 id="tituloModalPaciente">Nuevo paciente</h2>
     <div class="dos-columnas">
       <div class="campo"><label>Apellido paterno *</label><input id="pacApPaterno"></div>
-      <div class="campo"><label>Apellido materno *</label><input id="pacApMaterno"></div>
+      <div class="campo"><label>Apellido materno (opcional)</label><input id="pacApMaterno"></div>
     </div>
     <div class="campo"><label>Nombre(s) *</label><input id="pacNombres"></div>
     <div class="dos-columnas">
@@ -428,6 +428,7 @@
       </div>
       <div class="campo"><label>Monto pagado (MXN)</label><input id="conMonto" placeholder="0.00"></div>
     </div>
+    <div class="campo"><label>Folio Fiscal</label><input id="conFolio" inputmode="numeric" placeholder="Número, ej. 1024 (se registra pidan factura o no)"></div>
 
     <div class="acciones-modal">
       <button class="secundario" onclick="document.getElementById('modalConsulta').classList.remove('visible')">Cancelar</button>
@@ -1080,8 +1081,8 @@ async function guardarPaciente() {
   const paterno = $("pacApPaterno").value.trim();
   const materno = $("pacApMaterno").value.trim();
   const nombres = $("pacNombres").value.trim();
-  if (!paterno || !materno || !nombres) {
-    alert("Apellido paterno, apellido materno y nombre(s) son obligatorios.");
+  if (!paterno || !nombres) {
+    alert("Apellido paterno y nombre(s) son obligatorios.");
     return;
   }
   const nombre = [nombres, paterno, materno].filter(Boolean).join(" ");
@@ -1206,6 +1207,7 @@ async function imprimirDocumento(consultaId, tipo) {
   try { const raw = await leerJSON("membrete.json"); if (raw && !Array.isArray(raw)) mem = raw; } catch {}
   const nombre = mem.nombre || "";
   const especialidad = mem.especialidad || "";
+  const universidad = mem.universidad || "";
   const bIzq = mem.bloqueIzquierdo || "";
   const bDer = mem.bloqueDerecho || "";
   let firma = conFirma ? (mem.firmaDataURL || "") : "";
@@ -1255,6 +1257,7 @@ async function imprimirDocumento(consultaId, tipo) {
       </div>
       <div style="padding: 4px 2px">
         <div class="nombre">${escapar(nombre)}<span class="esp">${escapar(especialidad)}</span></div>
+        ${universidad ? `<div style="font-size:10.5px; color:#333">Institución que expide el título: ${escapar(universidad)}</div>` : ""}
         <div class="cols"><div>${escapar(bIzq)}</div><div>${escapar(bDer)}</div></div>
         <hr>
         <div class="datos"><b>Fecha:</b> ${escapar(fecha)}</div>
@@ -1305,6 +1308,7 @@ function renderHistoria() {
         `</div></div>` : ""}
       ${fila("Notas", c.notes)}
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}
+      ${(c.folioFiscal || "").trim() ? fila("Folio fiscal", c.folioFiscal) : ""}
       ${(() => { const m = (c.prescription && c.prescription.medications) || []; const est = String(c.studies||"").split("\n").filter(s=>s.trim()); const b = [];
         if (m.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','receta')">🖨️ Receta (PDF)</button>`);
         if (est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','estudios')">🖨️ Solicitud de estudios (PDF)</button>`);
@@ -1382,6 +1386,7 @@ function abrirModalConsulta(idEditar) {
     $("conNotas").value = editando.notes || "";
     $("conPago").value = editando.paymentMethod || "efectivo";
     $("conMonto").value = editando.amountPaid == null ? "" : editando.amountPaid;
+    $("conFolio").value = editando.folioFiscal || "";
     const v = editando.vitals || {};
     $("svTA").value=v.ta||""; $("svFC").value=v.fc||""; $("svFR").value=v.fr||"";
     $("svTemp").value=v.temperatura||""; $("svPeso").value=v.peso||""; $("svTalla").value=v.talla||"";
@@ -1391,6 +1396,8 @@ function abrirModalConsulta(idEditar) {
     $("conFecha").value = hoy();
     $("conTipo").value = previas.length ? "Seguimiento" : "Inicial";
     $("conPago").value = "efectivo";
+    $("conMonto").value = "";
+    $("conFolio").value = "";
     // Traer signos vitales de la consulta anterior (editables)
     const ant = previas.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
     if (ant && ant.vitals) {
@@ -1738,6 +1745,7 @@ async function guardarConsulta() {
     prescription: meds.length ? { medications: meds } : null,
     studies: $("conEstudios").value.trim(), studyInterpretation: $("conInterpretacion").value.trim(),
     paymentMethod: $("conPago").value, amountPaid: monto,
+    folioFiscal: $("conFolio").value.trim(),
     vitals: vacio ? null : vitals, physicalExam: $("conExploracion").value.trim(),
     treatmentPlan: $("conPlan").value.trim(),
   };
