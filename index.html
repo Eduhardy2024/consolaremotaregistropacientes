@@ -331,6 +331,17 @@
 
     <div class="campo" style="margin-top:4px">
       <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" id="pacAviso" style="width:auto" onchange="alternarAviso()">
+        Aviso de privacidad firmado / aceptado
+      </label>
+    </div>
+    <div class="campo" id="campoAvisoFecha" style="display:none">
+      <label>Fecha del aviso</label>
+      <input type="date" id="pacAvisoFecha">
+    </div>
+
+    <div class="campo" style="margin-top:4px">
+      <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
         <input type="checkbox" id="pacFactura" style="width:auto" onchange="alternarFacturacion()">
         Capturar datos de facturación
       </label>
@@ -407,12 +418,6 @@
     <div id="imcCalc" style="font-size:13px; color:var(--azul); margin:-6px 0 12px; display:none"></div>
 
     <div class="campo"><label>Exploración física</label><textarea id="conExploracion" rows="2"></textarea></div>
-    <div class="campo"><label>Diagnóstico</label><textarea id="conDiagnostico" rows="2"></textarea></div>
-    <div class="campo"><label>Plan de tratamiento</label><textarea id="conPlan" rows="2"></textarea></div>
-
-    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Receta médica</label>
-    <div id="listaMeds" style="margin:6px 0"></div>
-    <button class="secundario" onclick="agregarMed()" style="margin-bottom:12px">+ Agregar medicamento</button>
 
     <div class="campo"><label>Estudios de laboratorio / gabinete solicitados (uno por línea)</label><textarea id="conEstudios" rows="2"></textarea></div>
     <div class="campo"><label>Archivos de estudios (PDF o imágenes)</label>
@@ -421,7 +426,14 @@
         Se adjuntan a esta consulta; en la app de la doctora se pueden abrir y pedir su interpretación con IA.</div>
     </div>
     <div class="campo"><label>Interpretación de estudios</label><textarea id="conInterpretacion" rows="2"></textarea></div>
+
+    <div class="campo"><label>Diagnóstico</label><textarea id="conDiagnostico" rows="2"></textarea></div>
+    <div class="campo"><label>Plan de tratamiento</label><textarea id="conPlan" rows="2"></textarea></div>
     <div class="campo"><label>Notas clínicas</label><textarea id="conNotas" rows="2"></textarea></div>
+
+    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Receta médica</label>
+    <div id="listaMeds" style="margin:6px 0"></div>
+    <button class="secundario" onclick="agregarMed()" style="margin-bottom:12px">+ Agregar medicamento</button>
 
     <div class="dos-columnas">
       <div class="campo"><label>Método de pago</label>
@@ -1072,6 +1084,9 @@ function abrirModalPaciente(id) {
   $("pacBanco").checked = !!p.bancoMexico;
   $("pacBancoNum").value = p.bancoMexicoNumero || "";
   alternarBanco();
+  $("pacAviso").checked = !!p.avisoPrivacidad;
+  $("pacAvisoFecha").value = p.avisoPrivacidadFecha || "";
+  alternarAviso();
   $("pacFactura").checked = !!p.wantsInvoice;
   $("pacRfc").value = p.rfc || "";
   $("pacFiscalIgual").checked = p.taxAddressIsSame !== false;
@@ -1089,6 +1104,11 @@ function alternarFiscalIgual() {
 }
 function alternarBanco() {
   $("campoBancoNum").style.display = $("pacBanco").checked ? "block" : "none";
+}
+function alternarAviso() {
+  const on = $("pacAviso").checked;
+  $("campoAvisoFecha").style.display = on ? "block" : "none";
+  if (on && !$("pacAvisoFecha").value) $("pacAvisoFecha").value = hoy();
 }
 
 async function guardarPaciente() {
@@ -1121,6 +1141,8 @@ async function guardarPaciente() {
     allergies: $("pacAlergias").value.trim(),
     bancoMexico: $("pacBanco").checked,
     bancoMexicoNumero: $("pacBanco").checked ? $("pacBancoNum").value.trim() : "",
+    avisoPrivacidad: $("pacAviso").checked,
+    avisoPrivacidadFecha: $("pacAviso").checked ? ($("pacAvisoFecha").value || hoy()) : "",
     wantsInvoice: facturacion,
     rfc: facturacion ? $("pacRfc").value.trim().toUpperCase() : "",
     taxAddressIsSame: facturacion ? fiscalIgual : true,
@@ -1171,6 +1193,9 @@ function abrirHistoria(id) {
   $("histDatos").innerHTML = [
     p.rutOrId ? "RFC: " + escapar(p.rutOrId) : "",
     edadDe(p.birthDate), p.gender, p.phone ? "Tel: " + escapar(p.phone) : "",
+    p.avisoPrivacidad
+      ? "<span style='color:#16a34a'>✓ Aviso privacidad" + (p.avisoPrivacidadFecha ? " (" + escapar(p.avisoPrivacidadFecha) + ")" : "") + "</span>"
+      : "<span style='color:#d97706'>⚠ Falta aviso de privacidad</span>",
     p.allergies ? "<span style='color:var(--rojo)'>Alergias: " + escapar(p.allergies) + "</span>" : "",
   ].filter(Boolean).join(" · ");
   renderHistoria();
