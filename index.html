@@ -302,9 +302,10 @@
     <div class="campo"><label>Nombre(s) *</label><input id="pacNombres"></div>
     <div class="dos-columnas">
       <div class="campo"><label>RFC</label><input id="pacId"></div>
+      <div class="campo"><label>CURP</label><input id="pacCurp" placeholder="Pendiente de capturar"></div>
       <div class="campo"><label>Fecha de nacimiento</label><input type="date" id="pacNacimiento"></div>
       <div class="campo"><label>Género</label>
-        <select id="pacGenero"><option value=""></option><option>Femenino</option><option>Masculino</option><option>Otro</option></select>
+        <select id="pacGenero"><option value=""></option><option value="FEMENINO">Femenino</option><option value="MASCULINO">Masculino</option><option value="OTRO">Otro</option></select>
       </div>
       <div class="campo"><label>Grupo sanguíneo</label>
         <select id="pacSangre"><option value=""></option><option>O+</option><option>O-</option><option>A+</option>
@@ -465,13 +466,12 @@ const hoy = () => {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 };
 const uuid = () => {
-  // crypto.randomUUID solo existe en contextos seguros (https o archivo local);
-  // en http:// de red local se genera el UUID v4 con getRandomValues.
-  if (crypto.randomUUID) return crypto.randomUUID().toUpperCase();
-  const b = crypto.getRandomValues(new Uint8Array(16));
-  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
-  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-  return (h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20)).toUpperCase();
+  // ID numérico corto de 7 dígitos (homologado jul-2026 con la app de Mac),
+  // evitando chocar con cualquier id ya cargado en memoria.
+  const usados = new Set([...pacientes, ...consultas, ...citas].map((r) => r.id));
+  let id;
+  do { id = String(1000000 + Math.floor(Math.random() * 9000000)); } while (usados.has(id));
+  return id;
 };
 
 // ---------- Configuración guardada en este dispositivo ----------
@@ -758,6 +758,12 @@ function nombreDe(pacienteId) {
 }
 // Convierte el Markdown que genera la IA (**negritas**, viñetas, títulos,
 // numeración) en HTML limpio y legible. Escapa todo primero (seguro).
+// Quita marcadores de markdown (**, __, #, viñetas) dejando texto plano legible.
+function quitarMarkdown(texto) {
+  return String(texto || "").replace(/\r/g, "").split("\n").map((l) =>
+    l.replace(/^\s*#{1,6}\s+/, "").replace(/^(\s*)[\*\-•]\s+/, "$1• ").replace(/\*\*/g, "").replace(/__/g, "")
+  ).join("\n");
+}
 function formatearInterpretacion(texto) {
   const esc = (s) => escapar(s)
     // negritas **...** o __...__
@@ -817,6 +823,13 @@ function moverAgenda(n) {
 }
 function irHoy() { $("fechaAgenda").value = hoy(); dibujarAgenda(); }
 function citasDe(fecha) { return citas.filter((c) => c.date === fecha).sort((a,b) => (a.time||"").localeCompare(b.time||"")); }
+// Las citas duran 30 minutos: se muestra el rango inicio–fin en función de la hora.
+function finCita(hora) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hora || ""); if (!m) return "";
+  const t = (parseInt(m[1]) * 60 + parseInt(m[2]) + 30) % 1440;
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+}
+function rangoCita(c) { const f = finCita(c.time); return f ? c.time + "–" + f : (c.time || ""); }
 function nombrePac(id) { const p = pacientes.find(x=>x.id===id); return p ? p.name : "(eliminado)"; }
 function nombreClic(id) { return `<a href="#" onclick="abrirHistoria('${id}');return false" style="color:var(--azul); text-decoration:none">${escapar(nombrePac(id))}</a>`; }
 
@@ -864,7 +877,7 @@ function dibujarSemana() {
     html += `<div>
       <div class="cal-dow" style="cursor:pointer" onclick="$('fechaAgenda').value='${fecha}';setModo('dia')"><b>${DOW[i]} ${dia.getDate()}</b></div>
       <div class="sem-col" ${esHoy?'style="border-color:var(--azul)"':''}>
-        ${cs.length? cs.map(c=>`<div class="sem-cita" onclick="abrirModalCita('${c.id}')"><b>${escapar(c.time)}</b> ${escapar(nombrePac(c.patientId))}</div>`).join("") : '<div style="font-size:11px;color:var(--gris);text-align:center;padding-top:20px">—</div>'}
+        ${cs.length? cs.map(c=>`<div class="sem-cita" onclick="abrirModalCita('${c.id}')"><b>${escapar(rangoCita(c))}</b> ${escapar(nombrePac(c.patientId))}</div>`).join("") : '<div style="font-size:11px;color:var(--gris);text-align:center;padding-top:20px">—</div>'}
       </div></div>`;
   }
   $("listaCitas").innerHTML = html + "</div>";
@@ -882,7 +895,7 @@ function dibujarDia() {
   let html = "<table><tr><th>Hora</th><th>Paciente</th><th>Estado</th><th>Notas</th><th></th></tr>";
   for (const c of delDia) {
     html += `<tr>
-      <td><b>${escapar(c.time)}</b></td>
+      <td><b>${escapar(rangoCita(c))}</b></td>
       <td>${nombreClic(c.patientId)}</td>
       <td><select onchange="cambiarEstado('${c.id}', this.value)">
         ${["Pendiente", "Asistió", "No asistió", "Cancelado"]
@@ -1017,7 +1030,7 @@ function dibujarPacientes() {
   let html = "<table><tr><th>Nombre</th><th>RFC</th><th>Teléfono</th><th>Nacimiento</th><th></th></tr>";
   for (const p of lista) {
     html += `<tr>
-      <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a></td>
+      <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a>${(p.curp||"").trim() ? "" : ' <span title="Falta capturar el CURP" style="color:#d97706; cursor:help">⚠</span>'}</td>
       <td>${escapar(p.rutOrId)}</td>
       <td>${escapar(p.phone)}</td>
       <td>${escapar(p.birthDate)}</td>
@@ -1047,8 +1060,9 @@ function abrirModalPaciente(id) {
   $("pacApMaterno").value = materno;
   $("pacNombres").value = nombres;
   $("pacId").value = p.rutOrId || "";
+  $("pacCurp").value = p.curp || "";
   $("pacNacimiento").value = (p.birthDate || "").slice(0, 10);
-  $("pacGenero").value = p.gender || "";
+  $("pacGenero").value = (p.gender || "").toUpperCase();
   $("pacSangre").value = p.bloodType || "";
   $("pacTelefono").value = p.phone || "";
   $("pacTelefono2").value = p.phone2 || "";
@@ -1096,6 +1110,7 @@ async function guardarPaciente() {
     maternalSurname: materno,
     givenNames: nombres,
     rutOrId: $("pacId").value.trim(),
+    curp: $("pacCurp").value.trim().toUpperCase(),
     birthDate: $("pacNacimiento").value,
     gender: $("pacGenero").value,
     bloodType: $("pacSangre").value,
@@ -1294,12 +1309,12 @@ function renderHistoria() {
     const resumen = escapar(c.diagnosis || c.reason || "Consulta");
     const abierta = idx === 0; // la más reciente arranca expandida
     const detalle = `
-      ${fila("Motivo", c.reason)} ${fila("Síntomas", c.symptoms)}
+      ${fila("Motivo", quitarMarkdown(c.reason))} ${fila("Síntomas", quitarMarkdown(c.symptoms))}
       ${svTxt ? fila("Signos vitales", svTxt) : ""}
-      ${fila("Exploración", c.physicalExam)} ${fila("Diagnóstico", c.diagnosis)}
-      ${fila("Plan", c.treatmentPlan)}
+      ${fila("Exploración", quitarMarkdown(c.physicalExam))} ${fila("Diagnóstico", quitarMarkdown(c.diagnosis))}
+      ${fila("Plan", quitarMarkdown(c.treatmentPlan))}
       ${meds.length ? `<div style="margin-top:9px"><div style="font-size:13.5px; font-weight:700">Receta</div><ul style="font-size:13px; margin:2px 0 0 30px">` + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
-      ${fila("Estudios", c.studies)}
+      ${fila("Estudios", quitarMarkdown(c.studies))}
       ${(c.studyFiles && c.studyFiles.length) ? `<div style="margin-top:9px">
         <div style="font-size:13px; font-weight:700">Archivos adjuntos</div>
         <div style="font-size:13px; margin:2px 0 0 14px">` +
