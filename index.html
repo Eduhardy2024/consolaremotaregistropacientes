@@ -1048,7 +1048,7 @@ function dibujarPacientes() {
   let html = "<table><tr><th>Nombre</th><th>RFC</th><th>Teléfono</th><th>Nacimiento</th><th></th></tr>";
   for (const p of lista) {
     html += `<tr>
-      <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a>${(p.curp||"").trim() ? "" : ' <span title="Falta capturar el CURP" style="color:#d97706; cursor:help">⚠</span>'}</td>
+      <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a></td>
       <td>${escapar(p.rutOrId)}</td>
       <td>${escapar(p.phone)}</td>
       <td>${escapar(p.birthDate)}</td>
@@ -1197,8 +1197,9 @@ function abrirHistoria(id) {
   if (!p) return;
   $("histNombre").textContent = p.name;
   $("histDatos").innerHTML = [
-    p.rutOrId ? "RFC: " + escapar(p.rutOrId) : "",
+    p.rutOrId ? "RFC: " + escapar(p.rutOrId) : "<span style='color:#d97706'>⚠ Falta RFC</span>",
     edadDe(p.birthDate), p.gender, p.phone ? "Tel: " + escapar(p.phone) : "",
+    (p.curp || "").trim() ? "" : "<span style='color:#d97706'>⚠ Falta CURP</span>",
     p.avisoPrivacidad
       ? "<span style='color:#16a34a'>✓ Aviso privacidad" + (p.avisoPrivacidadFecha ? " (" + escapar(p.avisoPrivacidadFecha) + ")" : "") + "</span>"
       : "<span style='color:#d97706'>⚠ Falta aviso de privacidad</span>",
