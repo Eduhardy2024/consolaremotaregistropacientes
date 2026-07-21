@@ -419,17 +419,21 @@
 
     <div class="campo"><label>Exploración física</label><textarea id="conExploracion" rows="2"></textarea></div>
 
-    <div class="campo"><label>Estudios de laboratorio / gabinete solicitados (uno por línea)</label><textarea id="conEstudios" rows="2"></textarea></div>
+    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Estudios de la cita anterior</label>
+    <div class="campo"><label>Estudios solicitados en la cita anterior (uno por línea)</label><textarea id="conEstudiosPrevios" rows="2" oninput="dibujarRelacionArchivos()"></textarea></div>
     <div class="campo"><label>Archivos de estudios (PDF o imágenes)</label>
-      <input type="file" id="conArchivos" multiple accept="application/pdf,image/*">
+      <input type="file" id="conArchivos" multiple accept="application/pdf,image/*" onchange="dibujarRelacionArchivos()">
       <div style="font-size:12px; color:var(--gris); margin-top:3px">
         Se adjuntan a esta consulta; en la app de la doctora se pueden abrir y pedir su interpretación con IA.</div>
     </div>
+    <div id="conArchivosRelacion" style="margin:-4px 0 12px"></div>
     <div class="campo"><label>Interpretación de estudios</label><textarea id="conInterpretacion" rows="2"></textarea></div>
 
+    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Diagnóstico y plan de manejo</label>
     <div class="campo"><label>Diagnóstico</label><textarea id="conDiagnostico" rows="2"></textarea></div>
-    <div class="campo"><label>Plan de tratamiento</label><textarea id="conPlan" rows="2"></textarea></div>
+    <div class="campo"><label>Plan de manejo</label><textarea id="conPlan" rows="2"></textarea></div>
     <div class="campo"><label>Notas clínicas</label><textarea id="conNotas" rows="2"></textarea></div>
+    <div class="campo"><label>Estudios de laboratorio / gabinete solicitados (uno por línea)</label><textarea id="conEstudios" rows="2"></textarea></div>
 
     <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Receta médica</label>
     <div id="listaMeds" style="margin:6px 0"></div>
@@ -470,6 +474,8 @@ let pacienteEditandoId = null;
 let historiaPacienteId = null;
 let consultaEditandoId = null;   // id de la consulta que se está editando (null = nueva)
 let medsConsulta = [];
+let relacionArchivos = {};   // nombre de archivo → estudio de la cita anterior al que corresponde
+let relacionArchivosNombres = [];   // orden de los archivos mostrados en el menú de relación
 
 const $ = (id) => document.getElementById(id);
 // Fecha local (no UTC): con toISOString, después de las 6 pm en México ya marcaba "mañana"
@@ -1203,11 +1209,12 @@ function abrirHistoria(id) {
 }
 // Título del bloque de interpretación: menciona el estudio interpretado
 function tituloInterpretacion(c) {
-  const lineas = String(c.studies || "").split("\n").map((s) => s.trim()).filter(Boolean);
-  if (!lineas.length) return "Interpretación de estudios realizados";
+  const fuente = String(c.estudiosPrevios || "").trim() ? c.estudiosPrevios : c.studies;
+  const lineas = String(fuente || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  if (!lineas.length) return "Interpretación Estudios (IA)";
   let t = lineas[0];
   if (t.length > 48) t = t.slice(0, 48) + "…";
-  return "Interpretación: " + t + (lineas.length > 1 ? " (+" + (lineas.length - 1) + " más)" : "");
+  return "Interpretación Estudios (IA): " + t + (lineas.length > 1 ? " (+" + (lineas.length - 1) + " más)" : "");
 }
 // Pregunta con dos botones si el documento va con firma o sin firma.
 // Devuelve true (con), false (sin) o null (canceló).
@@ -1333,30 +1340,33 @@ function renderHistoria() {
       .filter(Boolean).join(" · ");
     const resumen = escapar(c.diagnosis || c.reason || "Consulta");
     const abierta = idx === 0; // la más reciente arranca expandida
+    const etiquetas = c.studyFileLabels || {};
     const detalle = `
       ${fila("Motivo", quitarMarkdown(c.reason))} ${fila("Síntomas", quitarMarkdown(c.symptoms))}
       ${svTxt ? fila("Signos vitales", svTxt) : ""}
-      ${fila("Exploración", quitarMarkdown(c.physicalExam))} ${fila("Diagnóstico", quitarMarkdown(c.diagnosis))}
-      ${fila("Plan", quitarMarkdown(c.treatmentPlan))}
-      ${meds.length ? `<div style="margin-top:9px"><div style="font-size:13.5px; font-weight:700">Receta</div><ul style="font-size:13px; margin:2px 0 0 30px">` + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
-      ${fila("Estudios", quitarMarkdown(c.studies))}
+      ${fila("Exploración física", quitarMarkdown(c.physicalExam))}
+      ${fila("Estudios (cita anterior)", quitarMarkdown(c.estudiosPrevios))}
       ${(c.studyFiles && c.studyFiles.length) ? `<div style="margin-top:9px">
         <div style="font-size:13px; font-weight:700">Archivos adjuntos</div>
         <div style="font-size:13px; margin:2px 0 0 14px">` +
         c.studyFiles.map((n, i) => `<a href="#" onclick="abrirVisor('${c.id}', ${i}); return false"
-          style="color:var(--azul); display:inline-block; margin:2px 12px 2px 0; text-decoration:none">📄 ${escapar(n)}</a>`).join("") +
+          style="color:var(--azul); display:inline-block; margin:2px 12px 2px 0; text-decoration:none">📄 ${escapar(n)}${etiquetas[n] ? ` <span style="color:var(--gris)">· ${escapar(etiquetas[n])}</span>` : ""}</a>`).join("") +
         `</div></div>` : ""}
+      ${(c.studyInterpretation || "").trim() ? `<details style="margin-top:10px; border-top:1px solid var(--borde); padding-top:8px">
+        <summary style="font-size:13px; font-weight:700; cursor:pointer">${escapar(tituloInterpretacion(c))} — mostrar / ocultar</summary>
+        <div style="font-size:13px; margin:6px 0 0 14px; line-height:1.45">${formatearInterpretacion(c.studyInterpretation)}</div>
+      </details>` : ""}
+      ${fila("Diagnóstico", quitarMarkdown(c.diagnosis))}
+      ${fila("Plan de manejo", quitarMarkdown(c.treatmentPlan))}
       ${fila("Notas", c.notes)}
+      ${fila("Estudios solicitados", quitarMarkdown(c.studies))}
+      ${meds.length ? `<div style="margin-top:9px"><div style="font-size:13.5px; font-weight:700">Receta</div><ul style="font-size:13px; margin:2px 0 0 30px">` + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}
       ${(c.folioFiscal || "").trim() ? fila("Folio fiscal", c.folioFiscal) : ""}
       ${(() => { const m = (c.prescription && c.prescription.medications) || []; const est = String(c.studies||"").split("\n").filter(s=>s.trim()); const b = [];
         if (m.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','receta')">🖨️ Receta (PDF)</button>`);
         if (est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','estudios')">🖨️ Solicitud de estudios (PDF)</button>`);
-        return b.length ? `<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">${b.join("")}</div>` : ""; })()}
-      ${(c.studyInterpretation || "").trim() ? `<details style="margin-top:12px; border-top:1px solid var(--borde); padding-top:8px">
-        <summary style="font-size:13px; font-weight:700; cursor:pointer">✨ ${escapar(tituloInterpretacion(c))} (IA) — mostrar / ocultar</summary>
-        <div style="font-size:13px; margin:6px 0 0 14px; line-height:1.45">${formatearInterpretacion(c.studyInterpretation)}</div>
-      </details>` : ""}`;
+        return b.length ? `<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">${b.join("")}</div>` : ""; })()}`;
     html += `<div style="border:1px solid var(--borde); border-radius:10px; margin-bottom:10px; overflow:hidden">
       <div onclick="toggleConsulta(${idx})" style="cursor:pointer; padding:10px 12px; background:var(--fondo); display:flex; align-items:center; gap:8px">
         <span id="chev${idx}" style="color:var(--gris); flex-shrink:0">${abierta ? "▾" : "▸"}</span>
@@ -1409,9 +1419,10 @@ function abrirModalConsulta(idEditar) {
   $("tituloModalConsulta").textContent = editando ? "Editar consulta" : "Nueva consulta";
   const previas = consultas.filter((c) => c.patientId === p.id);
   $("consultaPaciente").textContent = "Paciente: " + p.name;
-  ["conMotivo","conSintomas","conExploracion","conDiagnostico","conPlan","conEstudios","conInterpretacion","conNotas","conMonto",
+  ["conMotivo","conSintomas","conExploracion","conEstudiosPrevios","conDiagnostico","conPlan","conEstudios","conInterpretacion","conNotas","conMonto",
    "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
   $("conArchivos").value = "";
+  relacionArchivos = {};
   if (editando) {
     // Pre-llenar con la consulta existente
     $("conFecha").value = String(editando.date || "").slice(0, 10);
@@ -1419,11 +1430,13 @@ function abrirModalConsulta(idEditar) {
     $("conMotivo").value = editando.reason || "";
     $("conSintomas").value = editando.symptoms || "";
     $("conExploracion").value = editando.physicalExam || "";
+    $("conEstudiosPrevios").value = editando.estudiosPrevios || "";
     $("conDiagnostico").value = editando.diagnosis || "";
     $("conPlan").value = editando.treatmentPlan || "";
     $("conEstudios").value = editando.studies || "";
     $("conInterpretacion").value = editando.studyInterpretation || "";
     $("conNotas").value = editando.notes || "";
+    relacionArchivos = { ...(editando.studyFileLabels || {}) };
     $("conPago").value = editando.paymentMethod || "efectivo";
     $("conMonto").value = editando.amountPaid == null ? "" : editando.amountPaid;
     $("conFolio").value = editando.folioFiscal || "";
@@ -1438,8 +1451,9 @@ function abrirModalConsulta(idEditar) {
     $("conPago").value = "efectivo";
     $("conMonto").value = "";
     $("conFolio").value = "";
-    // Traer signos vitales de la consulta anterior (editables)
+    // Traer signos vitales y los estudios solicitados de la consulta anterior (editables)
     const ant = previas.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+    $("conEstudiosPrevios").value = (ant && ant.studies) || "";
     if (ant && ant.vitals) {
       const v = ant.vitals;
       $("svTA").value=v.ta||""; $("svFC").value=v.fc||""; $("svFR").value=v.fr||"";
@@ -1450,7 +1464,35 @@ function abrirModalConsulta(idEditar) {
   }
   dibujarMeds();
   calcIMC();
+  dibujarRelacionArchivos();
   $("modalConsulta").classList.add("visible");
+}
+
+// Muestra los archivos (ya guardados y recién elegidos) con un menú para
+// relacionarlos con el estudio de la cita anterior al que corresponden.
+function dibujarRelacionArchivos() {
+  const cont = $("conArchivosRelacion");
+  if (!cont) return;
+  const lineas = String($("conEstudiosPrevios").value || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const editando = consultaEditandoId ? consultas.find((c) => c.id === consultaEditandoId) : null;
+  const previos = (editando && editando.studyFiles) || [];
+  const nuevos = [...(($("conArchivos") && $("conArchivos").files) || [])].map((f) => nombreArchivoSeguro(f.name));
+  relacionArchivosNombres = [...previos, ...nuevos];
+  if (!relacionArchivosNombres.length) { cont.innerHTML = ""; return; }
+  const opciones = (sel) => `<option value="">General / sin especificar</option>` +
+    lineas.map((l) => `<option value="${escapar(l)}" ${sel === l ? "selected" : ""}>${escapar(l)}</option>`).join("");
+  cont.innerHTML = `<div style="font-size:12px; color:var(--gris); margin-bottom:4px">Relaciona cada archivo con su estudio:</div>` +
+    relacionArchivosNombres.map((n, i) => `<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px; font-size:13px">
+      <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">📄 ${escapar(n)}</span>
+      <select onchange="fijarRelacionArchivo(${i}, this.value)" style="max-width:55%">
+        ${opciones(relacionArchivos[n] || "")}
+      </select>
+    </div>`).join("");
+}
+function fijarRelacionArchivo(i, valor) {
+  const n = relacionArchivosNombres[i];
+  if (!n) return;
+  if (valor) relacionArchivos[n] = valor; else delete relacionArchivos[n];
 }
 function agregarMed() { medsConsulta.push({ name:"", dosage:"", frequency:"", duration:"", notes:"" }); dibujarMeds(); }
 function quitarMed(i) { medsConsulta.splice(i, 1); dibujarMeds(); }
@@ -1766,11 +1808,14 @@ async function guardarConsulta() {
   const nombresSubidos = [];
   try {
     for (const archivo of archivos) {
-      let nombre = nombreArchivoSeguro(archivo.name);
+      const base = nombreArchivoSeguro(archivo.name);
+      let nombre = base;
       let n = 2;
-      while (nombresSubidos.includes(nombre) || adjuntosPrevios.includes(nombre)) nombre = (n++) + "_" + nombreArchivoSeguro(archivo.name);
+      while (nombresSubidos.includes(nombre) || adjuntosPrevios.includes(nombre)) nombre = (n++) + "_" + base;
       await subirEstudio(idConsulta, archivo, nombre);
       nombresSubidos.push(nombre);
+      // Si cambió de nombre al subir, conservar su relación con el estudio.
+      if (nombre !== base && relacionArchivos[base]) { relacionArchivos[nombre] = relacionArchivos[base]; delete relacionArchivos[base]; }
     }
   } catch (e) {
     alert("No se pudo subir un archivo de estudios (" + e.message + "). "
@@ -1788,6 +1833,13 @@ async function guardarConsulta() {
     folioFiscal: $("conFolio").value.trim(),
     vitals: vacio ? null : vitals, physicalExam: $("conExploracion").value.trim(),
     treatmentPlan: $("conPlan").value.trim(),
+    estudiosPrevios: $("conEstudiosPrevios").value.trim(),
+  };
+  // Relación archivo → estudio, solo para los archivos que quedan en la consulta.
+  const etiquetasDe = (listaArchivos) => {
+    const out = {};
+    listaArchivos.forEach((n) => { if (relacionArchivos[n]) out[n] = relacionArchivos[n]; });
+    return out;
   };
   // Releer justo antes de escribir, para no pisar cambios de otros
   const actuales = await leerJSON("consultas.json");
@@ -1796,13 +1848,14 @@ async function guardarConsulta() {
     if (i < 0) { alert("Esta consulta ya no existe en la base."); return; }
     // Se conservan los campos que la consola no edita (facturación, etc.)
     // y los archivos previos; los recién subidos se suman.
+    const archivosFinales = [...(actuales[i].studyFiles || []), ...nombresSubidos];
     actuales[i] = { ...actuales[i], ...campos,
-      studyFiles: [...(actuales[i].studyFiles || []), ...nombresSubidos] };
+      studyFiles: archivosFinales, studyFileLabels: etiquetasDe(archivosFinales) };
   } else {
     actuales.push({
       id: idConsulta, patientId: p.id,
       requiresInvoice: false, confirmedRfc: "", confirmedTaxAddress: "",
-      studyFiles: nombresSubidos,
+      studyFiles: nombresSubidos, studyFileLabels: etiquetasDe(nombresSubidos),
       ...campos,
     });
   }
