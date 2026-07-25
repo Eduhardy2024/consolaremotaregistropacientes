@@ -339,6 +339,10 @@
       <label>Fecha del aviso</label>
       <input type="date" id="pacAvisoFecha">
     </div>
+    <div class="campo" style="margin-top:2px">
+      <button type="button" class="secundario" onclick="abrirFirmaAviso()">🖊️ Firmar en pantalla y generar PDF</button>
+      <div id="pacAvisoArchivo" style="font-size:12px; margin-top:6px"></div>
+    </div>
 
     <div class="campo" style="margin-top:4px">
       <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
@@ -365,6 +369,55 @@
     <div class="acciones-modal">
       <button class="secundario" onclick="document.getElementById('modalPaciente').classList.remove('visible')">Cancelar</button>
       <button class="primario" onclick="guardarPaciente()">Guardar paciente</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL FIRMA AVISO DE PRIVACIDAD ===================== -->
+<div class="modal-fondo" id="modalFirmaAviso" style="z-index:70">
+  <div class="modal" style="width:640px; max-width:96vw">
+    <h2 style="margin-bottom:2px">Aviso de Privacidad — Firma del paciente</h2>
+    <p style="font-size:12px; color:var(--gris); margin-top:0">
+      Paciente: <b id="firmaNombrePac">—</b> · Versión del aviso: <b id="firmaVersion">—</b>
+    </p>
+
+    <div id="firmaTextoAviso" style="max-height:34vh; overflow:auto; border:1px solid var(--linea,#dbe4f0);
+         border-radius:8px; padding:12px 14px; font-size:12px; line-height:1.5; background:#fbfcfe"></div>
+
+    <div class="campo" style="margin-top:12px">
+      <label style="text-transform:none; font-size:13px; color:#0f172a; display:flex; align-items:flex-start; gap:8px; cursor:pointer">
+        <input type="checkbox" id="firmaConsentNec" style="width:auto; margin-top:2px">
+        <span><b>Otorgo mi consentimiento expreso</b> para el tratamiento de mis datos personales sensibles de salud para las finalidades necesarias descritas.</span>
+      </label>
+    </div>
+    <div class="campo" style="margin-top:2px">
+      <label style="text-transform:none; font-size:13px; color:#0f172a; display:flex; align-items:flex-start; gap:8px; cursor:pointer">
+        <input type="checkbox" id="firmaConsentSec" style="width:auto; margin-top:2px">
+        <span>Acepto las finalidades <b>secundarias</b> (recordatorios / información de salud). <i>Opcional.</i></span>
+      </label>
+    </div>
+
+    <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris); display:block; margin-top:12px">Firma del paciente o representante</label>
+    <div style="border:1.5px dashed #94a3b8; border-radius:10px; background:#fff; touch-action:none; overflow:hidden; margin-top:4px">
+      <canvas id="firmaCanvas" style="display:block; width:100%; height:200px; touch-action:none"></canvas>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:6px">
+      <button type="button" class="secundario" onclick="limpiarFirma()">Limpiar firma</button>
+      <span id="firmaEstado" style="font-size:12px; color:var(--gris)"></span>
+    </div>
+    <div class="campo" style="margin-top:10px">
+      <label style="text-transform:none; font-size:13px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" id="firmaDescargar" style="width:auto" checked>
+        Descargar una copia del PDF en este dispositivo
+      </label>
+      <div style="font-size:11px; color:var(--gris); margin-top:2px">
+        Úsalo para archivar el documento manualmente o cuando no haya conexión a OneDrive.
+      </div>
+    </div>
+
+    <div class="acciones-modal" style="margin-top:16px">
+      <button class="secundario" onclick="document.getElementById('modalFirmaAviso').classList.remove('visible')">Cancelar</button>
+      <button class="primario" id="firmaBtnGuardar" onclick="guardarFirmaAviso()">Guardar firma y generar PDF</button>
     </div>
   </div>
 </div>
@@ -1159,6 +1212,7 @@ function abrirModalPaciente(id) {
   $("pacAviso").checked = !!p.avisoPrivacidad;
   $("pacAvisoFecha").value = p.avisoPrivacidadFecha || "";
   alternarAviso();
+  mostrarAvisoArchivo(p.avisoPrivacidadArchivo || "");
   $("pacFactura").checked = !!p.wantsInvoice;
   $("pacRfc").value = p.rfc || "";
   $("pacFiscalIgual").checked = p.taxAddressIsSame !== false;
@@ -1181,6 +1235,349 @@ function alternarAviso() {
   const on = $("pacAviso").checked;
   $("campoAvisoFecha").style.display = on ? "block" : "none";
   if (on && !$("pacAvisoFecha").value) $("pacAvisoFecha").value = hoy();
+}
+
+/* ==================================================================== */
+/* ============  MÓDULO: FIRMA DEL AVISO DE PRIVACIDAD  ================ */
+/* ==================================================================== */
+/* Plantilla v1 (PENDIENTE DE VALIDACIÓN LEGAL). Para actualizar el      */
+/* texto tras la aprobación del abogado, edita AVISO_PRIVACIDAD.         */
+const AVISO_PRIVACIDAD = {
+  version: "v1 (borrador)",
+  actualizado: "[dd/mm/aaaa]",
+  responsable: {
+    nombre: "Dr. Eduardo Hardy",
+    especialidad: "Medicina Interna",
+    cedulas: "Cedula Profesional 655713 · Cedula de Especialista AE-009069 · Certificado Medico General EM 15CMB337 · Reg. S.S.A. 83002",
+    domicilio: "Consultorio Dalias 218, Villa de las Flores, Coacalco, Estado de Mexico",
+    contacto: "Tels. 58756167 / 58797166 · Cel. 5518091019 · Correo hardydelpaso@gmail.com",
+    correoARCO: "hardydelpaso@gmail.com",
+  },
+  // Bloques del cuerpo: h = titulo, p = parrafo, li = vineta
+  cuerpo: [
+    { t: "h", s: "1. Responsable del tratamiento de sus datos personales" },
+    { t: "p", s: "@RESPONSABLE es el responsable del uso y proteccion de sus datos personales, conforme a la LFPDPPP." },
+    { t: "h", s: "2. Datos personales que recabamos" },
+    { t: "p", s: "Datos de identificacion y contacto: nombre completo, fecha de nacimiento, sexo, CURP, RFC, domicilio, telefono y correo electronico." },
+    { t: "p", s: "Datos personales sensibles (salud): historia clinica, antecedentes heredo-familiares y personales, padecimiento actual, diagnosticos, tratamientos y medicacion, resultados de estudios, signos vitales e imagenes clinicas." },
+    { t: "h", s: "3. Finalidades del tratamiento" },
+    { t: "p", s: "Finalidades necesarias (indispensables para la relacion medico-paciente):" },
+    { t: "li", s: "Brindarle atencion medica e integrar y conservar su expediente clinico." },
+    { t: "li", s: "Elaborar recetas, notas medicas, solicitudes de estudios e interconsultas." },
+    { t: "li", s: "Dar seguimiento a su tratamiento y agendar sus citas." },
+    { t: "li", s: "Cumplir obligaciones legales y sanitarias (NOM-004-SSA3-2012 y requerimientos de autoridad competente)." },
+    { t: "p", s: "Finalidades secundarias (opcionales, puede negarlas sin afectar su atencion): recordatorios de citas por telefono/mensaje/WhatsApp; envio de informacion de salud, prevencion o seguimiento." },
+    { t: "h", s: "4. Con quien compartimos sus datos" },
+    { t: "p", s: "Sus datos se tratan de forma confidencial y no se transfieren a terceros sin su consentimiento, salvo: cuando lo exija una autoridad competente o la ley; para interconsulta o continuidad de su atencion con un profesional que usted autorice; y proveedores de almacenamiento en la nube que resguardan la informacion por cuenta del responsable, con obligacion de confidencialidad." },
+    { t: "h", s: "5. Medidas de seguridad" },
+    { t: "p", s: "Control de acceso con usuario y contrasena, cifrado de equipos e informacion, bitacora de accesos y cambios, y respaldos periodicos." },
+    { t: "h", s: "6. Ejercicio de derechos ARCO y revocacion" },
+    { t: "p", s: "Usted puede Acceder, Rectificar, Cancelar u Oponerse al tratamiento de sus datos, asi como revocar su consentimiento. Envie su solicitud a @ARCO o presentese en el domicilio del punto 1, indicando su nombre, el derecho a ejercer y un medio para recibir respuesta." },
+    { t: "h", s: "7. Cambios al aviso de privacidad" },
+    { t: "p", s: "Este aviso puede actualizarse; las modificaciones se pondran a su disposicion en el consultorio y/o por correo. La version vigente incluye numero de version y fecha." },
+  ],
+};
+
+function avisoResponsableTexto() {
+  const r = AVISO_PRIVACIDAD.responsable;
+  return r.nombre + ", medico especialista en " + r.especialidad + " (" + r.cedulas
+    + "), con domicilio en " + r.domicilio + " (" + r.contacto + "),";
+}
+function avisoBloqueTexto(s) {
+  return s.replace("@RESPONSABLE", avisoResponsableTexto())
+          .replace("@ARCO", AVISO_PRIVACIDAD.responsable.correoARCO);
+}
+
+// Pinta en el formulario del paciente el estado del PDF firmado
+function mostrarAvisoArchivo(nombre) {
+  const cont = $("pacAvisoArchivo");
+  if (!cont) return;
+  if (nombre) {
+    cont.innerHTML = "<span style='color:#16a34a'>✓ PDF firmado:</span> "
+      + "<a href='#' onclick=\"verAvisoPDF('" + escapar(nombre).replace(/'/g, "\\'") + "'); return false;\">"
+      + escapar(nombre) + "</a>";
+  } else {
+    cont.innerHTML = "<span style='color:var(--gris)'>Sin PDF firmado todavía.</span>";
+  }
+}
+
+// ---- Apertura del modal de firma ----
+let _firmaCtx = null, _firmaDibujo = false, _firmaHayTrazo = false;
+function abrirFirmaAviso() {
+  if (!pacienteEditandoId) {
+    alert("Primero guarda al paciente (botón «Guardar paciente») y vuelve a abrirlo. La firma se archiva sobre un paciente ya registrado.");
+    return;
+  }
+  const p = pacientes.find((x) => x.id === pacienteEditandoId);
+  if (!p) { alert("No encontré al paciente. Guárdalo y reintenta."); return; }
+  $("firmaNombrePac").textContent = p.name || "—";
+  $("firmaVersion").textContent = AVISO_PRIVACIDAD.version;
+  // Texto del aviso en pantalla
+  let html = "";
+  for (const b of AVISO_PRIVACIDAD.cuerpo) {
+    const txt = escapar(avisoBloqueTexto(b.s));
+    if (b.t === "h") html += "<div style='font-weight:700; color:#0f2c52; margin:10px 0 3px'>" + txt + "</div>";
+    else if (b.t === "li") html += "<div style='margin:2px 0 2px 14px'>• " + txt + "</div>";
+    else html += "<div style='margin:3px 0'>" + txt + "</div>";
+  }
+  $("firmaTextoAviso").innerHTML = html;
+  $("firmaConsentNec").checked = false;
+  $("firmaConsentSec").checked = false;
+  $("firmaEstado").textContent = "";
+  $("firmaBtnGuardar").disabled = false;
+  $("modalFirmaAviso").classList.add("visible");
+  setTimeout(prepararCanvasFirma, 60); // tras render, para medir ancho real
+}
+
+function prepararCanvasFirma() {
+  const c = $("firmaCanvas");
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 560, h = c.clientHeight || 200;
+  c.width = Math.round(w * dpr);
+  c.height = Math.round(h * dpr);
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineWidth = 2.2; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = "#0b1b3a";
+  ctx.clearRect(0, 0, w, h);
+  _firmaCtx = ctx; _firmaHayTrazo = false;
+
+  const pos = (e) => {
+    const r = c.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  };
+  const empezar = (e) => { e.preventDefault(); _firmaDibujo = true; const {x,y}=pos(e); ctx.beginPath(); ctx.moveTo(x,y); };
+  const mover = (e) => { if(!_firmaDibujo) return; e.preventDefault(); const {x,y}=pos(e); ctx.lineTo(x,y); ctx.stroke(); _firmaHayTrazo = true; };
+  const terminar = (e) => { if(_firmaDibujo){e.preventDefault();} _firmaDibujo = false; };
+  // Reemplaza handlers previos clonando no es necesario: onX asignaciones sobrescriben
+  c.onpointerdown = empezar; c.onpointermove = mover; c.onpointerup = terminar; c.onpointerleave = terminar;
+  c.ontouchstart = empezar; c.ontouchmove = mover; c.ontouchend = terminar;
+}
+function limpiarFirma() {
+  if (!_firmaCtx) return;
+  const c = $("firmaCanvas");
+  _firmaCtx.clearRect(0, 0, c.clientWidth, c.clientHeight);
+  _firmaHayTrazo = false;
+}
+
+// ---- pdf-lib bajo demanda (mismo patrón que pdf.js) ----
+let _pdflib = null;
+async function cargarPdfLib() {
+  if (_pdflib) return _pdflib;
+  _pdflib = await import("https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm");
+  return _pdflib;
+}
+
+// ---- Folio de verificación (hash del documento) ----
+async function folioAviso(semilla) {
+  const datos = new TextEncoder().encode(semilla);
+  const h = await crypto.subtle.digest("SHA-256", datos);
+  return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 12).toUpperCase();
+}
+
+// ---- Construcción del PDF con pdf-lib ----
+async function construirPDFAviso(datos) {
+  const { PDFDocument, StandardFonts, rgb } = await cargarPdfLib();
+  const doc = await PDFDocument.create();
+  const fuente = await doc.embedFont(StandardFonts.Helvetica);
+  const negrita = await doc.embedFont(StandardFonts.HelveticaBold);
+  const cursiva = await doc.embedFont(StandardFonts.HelveticaOblique);
+
+  const A4 = [595.28, 841.89];
+  const margen = 48, anchoUtil = A4[0] - margen * 2;
+  const azul = rgb(0.06, 0.17, 0.32), gris = rgb(0.33, 0.36, 0.42), negro = rgb(0.1, 0.13, 0.19);
+  let pagina = doc.addPage(A4), y = A4[1] - margen;
+
+  const nuevaPagina = () => { pagina = doc.addPage(A4); y = A4[1] - margen; };
+  const espacio = (n) => { y -= n; if (y < margen + 40) nuevaPagina(); };
+  const envolver = (texto, font, size) => {
+    const palabras = String(texto).split(/\s+/); const lineas = []; let linea = "";
+    for (const w of palabras) {
+      const prueba = linea ? linea + " " + w : w;
+      if (font.widthOfTextAtSize(prueba, size) > anchoUtil - 4 && linea) { lineas.push(linea); linea = w; }
+      else linea = prueba;
+    }
+    if (linea) lineas.push(linea);
+    return lineas;
+  };
+  const escribir = (texto, { font = fuente, size = 10, color = negro, sangria = 0, alto = 14 } = {}) => {
+    for (const linea of envolver(texto, font, size)) {
+      if (y < margen + alto) nuevaPagina();
+      pagina.drawText(linea, { x: margen + sangria, y: y - size, size, font, color });
+      y -= alto;
+    }
+  };
+
+  // Encabezado / banner
+  escribir("PLANTILLA v1 - PENDIENTE DE VALIDACION LEGAL", { font: cursiva, size: 8.5, color: rgb(0.7, 0.33, 0.05), alto: 12 });
+  escribir("Aviso de Privacidad y Consentimiento para el Tratamiento de Datos Personales", { font: negrita, size: 14, color: azul, alto: 18 });
+  escribir("Version del documento: " + AVISO_PRIVACIDAD.version + "   ·   Ultima actualizacion: " + AVISO_PRIVACIDAD.actualizado, { size: 8.5, color: gris, alto: 13 });
+  espacio(6);
+
+  // Cuerpo del aviso
+  for (const b of AVISO_PRIVACIDAD.cuerpo) {
+    const txt = avisoBloqueTexto(b.s);
+    if (b.t === "h") { espacio(6); escribir(txt, { font: negrita, size: 11, color: azul, alto: 15 }); espacio(2); }
+    else if (b.t === "li") escribir("-  " + txt, { size: 10, sangria: 12, alto: 13.5 });
+    else escribir(txt, { size: 10, alto: 13.5 });
+  }
+
+  // Bloque de consentimiento y firma
+  espacio(10);
+  if (y < margen + 210) nuevaPagina();
+  pagina.drawLine({ start: { x: margen, y }, end: { x: A4[0] - margen, y }, thickness: 1, color: rgb(0.86, 0.89, 0.94) });
+  espacio(14);
+  escribir("Consentimiento expreso del paciente", { font: negrita, size: 12, color: azul, alto: 16 });
+  escribir("Manifiesto que se me dio a conocer y comprendi el presente Aviso de Privacidad y que se me informo el tratamiento de mis datos personales sensibles de salud.", { size: 9.5, alto: 13 });
+  espacio(4);
+  escribir((datos.consentNec ? "[X]" : "[ ]") + "  Otorgo mi consentimiento expreso para el tratamiento de mis datos sensibles de salud para las finalidades necesarias.", { size: 9.5, alto: 13 });
+  escribir((datos.consentSec ? "[X]" : "[ ]") + "  Acepto las finalidades secundarias (opcional).", { size: 9.5, alto: 13 });
+  espacio(8);
+
+  // Datos del paciente
+  const p = datos.paciente;
+  escribir("Paciente: " + (p.name || ""), { font: negrita, size: 10, alto: 14 });
+  escribir("Expediente/Folio: " + (p.id || "") + "     CURP/ID: " + (p.curp || p.rutOrId || "-"), { size: 9.5, color: gris, alto: 13 });
+  espacio(6);
+
+  // Firma (imagen)
+  escribir("Firma del paciente o representante legal:", { size: 9.5, color: gris, alto: 13 });
+  const png = await doc.embedPng(datos.firmaDataURL);
+  const anchoFirma = 240, altoFirma = (png.height / png.width) * anchoFirma;
+  const altoCaja = Math.min(90, Math.max(60, altoFirma + 10));
+  if (y < margen + altoCaja + 60) nuevaPagina();
+  pagina.drawRectangle({ x: margen, y: y - altoCaja, width: anchoFirma + 20, height: altoCaja, borderColor: rgb(0.58, 0.64, 0.72), borderWidth: 1 });
+  pagina.drawImage(png, { x: margen + 10, y: y - altoCaja + (altoCaja - Math.min(altoFirma, altoCaja - 10)) / 2, width: anchoFirma, height: Math.min(altoFirma, altoCaja - 10) });
+  y -= altoCaja + 8;
+
+  escribir("Fecha y hora de firma: " + datos.fechaHora, { size: 9.5, alto: 13 });
+  escribir("Folio de verificacion del documento: " + datos.folio, { font: negrita, size: 9.5, alto: 13 });
+  espacio(8);
+  escribir("Documento generado por el sistema Registro de Pacientes. Conservacion minima del expediente: 5 anios (NOM-004-SSA3-2012).", { font: cursiva, size: 8, color: gris, alto: 11 });
+
+  return await doc.save(); // Uint8Array
+}
+
+// ---- Descarga local del PDF (respaldo / modo sin OneDrive) ----
+function descargarBytesPDF(nombre, bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// ---- Subida a OneDrive: <base>/AvisosPrivacidad/<archivo> ----
+async function subirAviso(nombreArchivo, bytes) {
+  const token = await obtenerToken();
+  if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
+  const url = urlGraphDe("AvisosPrivacidad/" + nombreArchivo);
+  const opciones = { method: "PUT",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/pdf" },
+    body: bytes };
+  let r = await fetch(url, opciones);
+  if (r.status === 404) {
+    await crearCarpetaGraph("", "AvisosPrivacidad", token);
+    r = await fetch(url, opciones);
+  }
+  if (!r.ok) throw new Error("OneDrive código " + r.status);
+}
+
+// ---- Abre un PDF de aviso ya guardado ----
+async function verAvisoPDF(nombre) {
+  try {
+    const token = await obtenerToken();
+    if (!token) { sesionCaducada(); return; }
+    const r = await fetch(urlGraphDe("AvisosPrivacidad/" + nombre), { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) throw new Error("código " + r.status);
+    const url = URL.createObjectURL(await r.blob());
+    window.open(url, "_blank");
+  } catch (e) {
+    alert("No pude abrir el PDF (" + e.message + ").");
+  }
+}
+
+// ---- Guardar firma: genera PDF, lo sube y actualiza al paciente ----
+async function guardarFirmaAviso() {
+  if (!$("firmaConsentNec").checked) {
+    alert("El paciente debe marcar el consentimiento expreso (casilla obligatoria) para poder firmar.");
+    return;
+  }
+  if (!_firmaHayTrazo) { alert("Falta la firma del paciente en el recuadro."); return; }
+  const p = pacientes.find((x) => x.id === pacienteEditandoId);
+  if (!p) { alert("No encontré al paciente."); return; }
+
+  const btn = $("firmaBtnGuardar");
+  btn.disabled = true;
+  $("firmaEstado").textContent = "Generando PDF…";
+  try {
+    const ahora = new Date();
+    const fechaHora = ahora.toLocaleString("es-MX", { dateStyle: "long", timeStyle: "short" });
+    const folio = await folioAviso(p.id + "|" + p.name + "|" + ahora.toISOString() + "|" + AVISO_PRIVACIDAD.version);
+    const firmaDataURL = $("firmaCanvas").toDataURL("image/png");
+
+    const bytes = await construirPDFAviso({
+      paciente: p, firmaDataURL,
+      consentNec: $("firmaConsentNec").checked,
+      consentSec: $("firmaConsentSec").checked,
+      folio, fechaHora,
+    });
+
+    const sello = ahora.toISOString().slice(0, 19).replace(/[:T]/g, "").replace(/-/g, "");
+    const nombreArchivo = "Aviso_" + p.id + "_" + sello + ".pdf";
+    const fechaISO = ahora.toISOString().slice(0, 10);
+
+    // 1) Copia local: se entrega SIEMPRE que la casilla esté marcada,
+    //    aunque OneDrive falle, para no perder el documento firmado.
+    let descargado = false;
+    if ($("firmaDescargar").checked) {
+      descargarBytesPDF(nombreArchivo, bytes);
+      descargado = true;
+    }
+
+    // 2) Archivado en OneDrive + marca en la ficha del paciente (no fatal).
+    let enNube = false;
+    try {
+      $("firmaEstado").textContent = "Guardando en OneDrive…";
+      await subirAviso(nombreArchivo, bytes);
+      const lista = await leerJSON("pacientes.json");
+      const i = lista.findIndex((x) => x.id === p.id);
+      if (i >= 0) {
+        lista[i].avisoPrivacidad = true;
+        lista[i].avisoPrivacidadFecha = fechaISO;
+        lista[i].avisoPrivacidadArchivo = nombreArchivo;
+        lista[i].updatedAt = ahora.toISOString();
+        await escribirJSON("pacientes.json", lista);
+        pacientes = lista;
+      }
+      enNube = true;
+    } catch (eNube) {
+      if (!descargado) throw eNube; // sin copia local: sí es error real
+      console.warn("Aviso: OneDrive falló, se conservó copia local.", eNube);
+    }
+
+    // Refleja el estado en el formulario abierto
+    $("pacAviso").checked = true;
+    $("pacAvisoFecha").value = fechaISO;
+    alternarAviso();
+    if (enNube) mostrarAvisoArchivo(nombreArchivo);
+
+    $("modalFirmaAviso").classList.remove("visible");
+    dibujarTodo();
+
+    if (enNube && descargado)
+      alert("Aviso de privacidad firmado.\nGuardado en OneDrive y descargada una copia.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
+    else if (enNube)
+      alert("Aviso de privacidad firmado y guardado en OneDrive.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
+    else
+      alert("Aviso firmado y DESCARGADO en este dispositivo.\n⚠️ No se pudo guardar en OneDrive (sin conexión). Archívalo manualmente en el historial y, cuando haya conexión, marca el aviso en la ficha del paciente.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
+  } catch (e) {
+    alert("No se pudo generar/guardar el PDF: " + e.message);
+    $("firmaEstado").textContent = "";
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function guardarPaciente() {
