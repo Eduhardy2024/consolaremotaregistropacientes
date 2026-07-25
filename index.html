@@ -377,9 +377,12 @@
         <h2 id="histNombre" style="margin-bottom:2px">Historia clínica</h2>
         <div id="histDatos" style="font-size:13px; color:var(--gris)"></div>
       </div>
-      <div style="display:flex; gap:8px; flex-shrink:0">
-        <button class="secundario" onclick="editarPacienteDesdeHistoria()">✏️ Editar paciente</button>
-        <button class="primario" onclick="abrirModalConsulta()">+ Nueva consulta</button>
+      <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0; align-items:stretch">
+        <div style="display:flex; gap:8px">
+          <button class="secundario" onclick="editarPacienteDesdeHistoria()">✏️ Editar paciente</button>
+          <button class="primario" onclick="abrirModalConsulta()">+ Nueva consulta</button>
+        </div>
+        <button class="secundario" onclick="imprimirHistorialClinico(historiaPacienteId)">📄 Historial Clínico – PDF</button>
       </div>
     </div>
     <div id="histLista" style="margin-top:14px"></div>
@@ -396,10 +399,15 @@
     <div id="consultaPaciente" style="font-size:13px; color:var(--gris); margin-bottom:10px"></div>
 
     <div class="dos-columnas">
-      <div class="campo"><label>Fecha</label><input type="date" id="conFecha"></div>
+      <div class="campo"><label>Fecha</label><input type="date" id="conFecha" onchange="actualizarHoraCitaLigada(historiaPacienteId)"></div>
       <div class="campo"><label>Tipo de consulta</label>
         <select id="conTipo"><option>Seguimiento</option><option>Inicial</option></select>
       </div>
+    </div>
+    <div class="campo" id="conHoraCitaWrap" style="display:none">
+      <label>Hora de la cita (ligada al calendario)</label>
+      <input type="time" id="conHoraCita">
+      <div style="font-size:12px; color:var(--gris); margin-top:3px">Lo que cambies aquí se refleja en la cita del calendario.</div>
     </div>
     <div class="campo"><label>Motivo de consulta</label><input id="conMotivo" placeholder="Ej. dolor abdominal"></div>
     <div class="campo"><label>Síntomas / padecimiento actual</label><textarea id="conSintomas" rows="2"></textarea></div>
@@ -476,6 +484,64 @@ let consultaEditandoId = null;   // id de la consulta que se está editando (nul
 let medsConsulta = [];
 let relacionArchivos = {};   // nombre de archivo → estudio de la cita anterior al que corresponde
 let relacionArchivosNombres = [];   // orden de los archivos mostrados en el menú de relación
+let citaLigadaConsultaId = null;    // cita (mismo paciente y día) ligada a la consulta abierta
+
+// Lunes (yyyy-mm-dd) de la semana de una fecha, para comparar "misma semana".
+function lunesDe(fechaStr) {
+  const d = new Date(String(fechaStr).slice(0, 10) + "T00:00:00");
+  const dow = (d.getDay() + 6) % 7;   // 0 = lunes
+  d.setDate(d.getDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function mismaSemana(a, b) { return lunesDe(a) === lunesDe(b); }
+
+// Muestra/oculta el campo "Hora de la cita" según haya una cita ligada ese día.
+function actualizarHoraCitaLigada(pacienteId) {
+  const fecha = String($("conFecha").value || "").slice(0, 10);
+  const ligada = citas.find((c) => c.patientId === pacienteId && String(c.date).slice(0, 10) === fecha);
+  if (ligada) {
+    citaLigadaConsultaId = ligada.id;
+    $("conHoraCita").value = ligada.time || "";
+    $("conHoraCitaWrap").style.display = "";
+  } else {
+    citaLigadaConsultaId = null;
+    $("conHoraCitaWrap").style.display = "none";
+  }
+}
+
+// Al guardar una consulta: sincroniza la cita ligada (hora + marca Asistió) o,
+// si no hay, ofrece asociar una pendiente de la semana o crear una nueva.
+async function sincronizarCitaDeConsulta(paciente, fecha, esEdicion) {
+  const dia = String(fecha).slice(0, 10);
+  const hora = $("conHoraCita") ? $("conHoraCita").value : "";
+  const actualesCitas = await leerJSON("citas.json");
+  let idx = citaLigadaConsultaId ? actualesCitas.findIndex((c) => c.id === citaLigadaConsultaId) : -1;
+  if (idx < 0) idx = actualesCitas.findIndex((c) => c.patientId === paciente.id && String(c.date).slice(0, 10) === dia);
+  if (idx >= 0) {
+    if (hora) actualesCitas[idx].time = hora;
+    actualesCitas[idx].date = dia;
+    actualesCitas[idx].status = "Asistió";
+    await escribirJSON("citas.json", actualesCitas);
+    citas = actualesCitas;
+    return;
+  }
+  if (esEdicion) return;   // al editar no se crean citas nuevas
+  const pend = actualesCitas.find((c) => c.patientId === paciente.id && c.status === "Pendiente" && mismaSemana(dia, c.date));
+  if (pend) {
+    if (confirm(`Hay una cita el ${fechaLarga(pend.date)} a las ${pend.time} esta semana. ¿Es de esta consulta? Se marcará como Asistió.`)) {
+      pend.status = "Asistió";
+      await escribirJSON("citas.json", actualesCitas);
+      citas = actualesCitas;
+    }
+    return;
+  }
+  if (confirm("¿Registrar esta consulta en la agenda como cita 'Asistió'?")) {
+    actualesCitas.push({ id: uuid(), patientId: paciente.id, date: dia,
+      time: hora || "09:00", status: "Asistió", notes: $("conMotivo").value.trim() });
+    await escribirJSON("citas.json", actualesCitas);
+    citas = actualesCitas;
+  }
+}
 
 const $ = (id) => document.getElementById(id);
 // Fecha local (no UTC): con toISOString, después de las 6 pm en México ya marcaba "mañana"
@@ -1243,6 +1309,118 @@ function preguntarFirma(etiqueta) {
 }
 
 // ---------- Receta y solicitud de estudios en PDF (ventana de impresión) ----------
+// ---------- Reporte de consulta e Historial clínico en PDF ----------
+async function cargarMembrete() {
+  let mem = {};
+  try { const raw = await leerJSON("membrete.json"); if (raw && !Array.isArray(raw)) mem = raw; } catch {}
+  return mem;
+}
+function estilosImpresion() {
+  return `<style>
+    @page { margin: 1.6cm; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+    .nombre { font-size: 20px; font-weight: 800; }
+    .esp { font-size: 12px; color: #333; font-weight: 500; margin-left: 6px; }
+    .cols { display: flex; justify-content: space-between; gap: 20px; font-size: 10.5px; color: #333; margin-top: 4px; }
+    .cols div { white-space: pre-line; }
+    hr { border: none; border-top: 1px solid #333; margin: 10px 0 12px; }
+    .datos { font-size: 13px; margin-bottom: 5px; }
+    .datos b { font-weight: 700; }
+    h2 { font-size: 15px; margin: 14px 0 4px; }
+    .campo-nota { font-size: 13.5px; line-height: 1.5; white-space: pre-line; margin-bottom: 4px; }
+    ol { font-size: 13.5px; line-height: 1.5; padding-left: 22px; }
+    li { margin-bottom: 6px; }
+    .consulta { page-break-inside: avoid; border-top: 1px solid #ccc; padding-top: 8px; margin-top: 12px; }
+    @media print { .noimprimir { display: none; } }
+  </style>`;
+}
+function encabezadoMembrete(mem) {
+  return `<div class="nombre">${escapar(mem.nombre||"")}<span class="esp">${escapar(mem.especialidad||"")}</span></div>
+    ${mem.universidad ? `<div style="font-size:10.5px; color:#333">Institución que expide el título: ${escapar(mem.universidad)}</div>` : ""}
+    <div class="cols"><div>${escapar(mem.bloqueIzquierdo||"")}</div><div>${escapar(mem.bloqueDerecho||"")}</div></div>
+    <hr>`;
+}
+function abrirImpresion(titulo, inner) {
+  const doc = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${escapar(titulo)}</title>${estilosImpresion()}</head>
+    <body onload="setTimeout(function(){ window.focus(); window.print(); }, 350)">
+      <div class="noimprimir" style="background:#eef; padding:8px 12px; font-size:13px; text-align:center">
+        Se abrirá el cuadro de impresión. Elige <b>«Guardar como PDF»</b> o tu impresora.
+        <button onclick="window.print()">Imprimir de nuevo</button>
+        <button onclick="window.close()">Cerrar ventana</button>
+      </div>
+      <div style="padding: 4px 2px">${inner}</div>
+    </body></html>`;
+  const w = window.open("", "_blank", "width=850,height=1100");
+  if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+}
+function campoNotaHTML(titulo, valor) {
+  return String(valor||"").trim() ? `<h2>${escapar(titulo)}</h2><div class="campo-nota">${escapar(String(valor).trim())}</div>` : "";
+}
+function signosHTML(v) {
+  if (!v) return "";
+  const t = ["ta","fc","fr","temperatura","peso","talla","spo2","glucosa"]
+    .map((k) => v[k] ? ({ta:"TA",fc:"FC",fr:"FR",temperatura:"Temp",peso:"Peso",talla:"Talla",spo2:"SpO2",glucosa:"Gluc"}[k] + " " + v[k]) : "")
+    .filter(Boolean).join(" · ");
+  return t ? campoNotaHTML("Signos vitales", t) : "";
+}
+function recetaHTML(c) {
+  const meds = (c.prescription && c.prescription.medications) || [];
+  if (!meds.length) return "";
+  return `<h2>Receta médica</h2><ol>` + meds.map((m) => "<li><b>" + escapar(m.name) + "</b> " + escapar(m.dosage||"")
+    + (m.frequency ? " — cada " + escapar(m.frequency) : "")
+    + (m.duration ? " por " + escapar(m.duration) : "")
+    + (m.notes ? "<br><span style='color:#444'>" + escapar(m.notes) + "</span>" : "") + "</li>").join("") + "</ol>";
+}
+function cuerpoConsultaHTML(c) {
+  return campoNotaHTML("Motivo", c.reason)
+    + campoNotaHTML("Síntomas / padecimiento actual", c.symptoms)
+    + signosHTML(c.vitals)
+    + campoNotaHTML("Exploración física", c.physicalExam)
+    + campoNotaHTML("Estudios de la cita anterior", c.estudiosPrevios)
+    + campoNotaHTML("Interpretación de estudios", quitarMarkdown(c.studyInterpretation))
+    + campoNotaHTML("Diagnóstico", c.diagnosis)
+    + campoNotaHTML("Plan de manejo", c.treatmentPlan)
+    + campoNotaHTML("Notas clínicas", c.notes)
+    + campoNotaHTML("Estudios solicitados", c.studies)
+    + recetaHTML(c);
+}
+async function imprimirNotaConsulta(consultaId) {
+  const c = consultas.find((x) => x.id === consultaId); if (!c) return;
+  const p = pacientes.find((x) => x.id === c.patientId) || {};
+  const mem = await cargarMembrete();
+  const edad = edadDe(p.birthDate);
+  const inner = encabezadoMembrete(mem)
+    + `<div class="datos"><b>Fecha:</b> ${escapar(fechaLarga(c.date))}</div>`
+    + `<div class="datos"><b>Paciente:</b> ${escapar(p.name||"")}${edad ? " &nbsp;·&nbsp; <b>Edad:</b> " + escapar(edad) : ""}${p.rutOrId ? " &nbsp;·&nbsp; <b>RFC:</b> " + escapar(p.rutOrId) : ""}</div>`
+    + `<h2>Nota de consulta · ${escapar((c.visitType||"Seguimiento").toLowerCase())}</h2>`
+    + cuerpoConsultaHTML(c);
+  abrirImpresion("Reporte de consulta", inner);
+}
+async function imprimirHistorialClinico(pacienteId) {
+  const p = pacientes.find((x) => x.id === pacienteId); if (!p) return;
+  const cons = consultas.filter((c) => c.patientId === pacienteId).sort((a,b) => (b.date||"").localeCompare(a.date||""));
+  const mem = await cargarMembrete();
+  const edad = edadDe(p.birthDate);
+  let inner = encabezadoMembrete(mem)
+    + `<div class="datos"><b>Paciente:</b> ${escapar(p.name||"")}</div>`
+    + (p.rutOrId ? `<div class="datos"><b>RFC:</b> ${escapar(p.rutOrId)}</div>` : "")
+    + (p.curp ? `<div class="datos"><b>CURP:</b> ${escapar(p.curp)}</div>` : "")
+    + (edad ? `<div class="datos"><b>Edad:</b> ${escapar(edad)}</div>` : "")
+    + (p.phone ? `<div class="datos"><b>Teléfono:</b> ${escapar(p.phone)}</div>` : "")
+    + campoNotaHTML("Alergias", p.allergies)
+    + campoNotaHTML("Antecedentes personales", p.personalHistory)
+    + campoNotaHTML("Antecedentes familiares", p.familyHistory)
+    + campoNotaHTML("Medicamentos de uso continuo", p.continuousMedication)
+    + `<h2 style="margin-top:12px">Consultas (${cons.length})</h2>`;
+  if (!cons.length) inner += `<div class="campo-nota">Sin consultas registradas.</div>`;
+  cons.forEach((c) => {
+    inner += `<div class="consulta"><h2 style="margin:0 0 4px">${escapar(fechaLarga(c.date))} · Consulta ${escapar((c.visitType||"Seguimiento").toLowerCase())}</h2>${cuerpoConsultaHTML(c)}</div>`;
+  });
+  abrirImpresion("Historial clínico – " + (p.name||""), inner);
+}
+
 async function imprimirDocumento(consultaId, tipo) {
   const c = consultas.find((x) => x.id === consultaId);
   if (!c) return;
@@ -1365,9 +1543,10 @@ function renderHistoria() {
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}
       ${(c.folioFiscal || "").trim() ? fila("Folio fiscal", c.folioFiscal) : ""}
       ${(() => { const m = (c.prescription && c.prescription.medications) || []; const est = String(c.studies||"").split("\n").filter(s=>s.trim()); const b = [];
-        if (m.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','receta')">🖨️ Receta (PDF)</button>`);
-        if (est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','estudios')">🖨️ Solicitud de estudios (PDF)</button>`);
-        return b.length ? `<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">${b.join("")}</div>` : ""; })()}`;
+        b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirNotaConsulta('${c.id}')">📄 Reporte Consulta – PDF</button>`);
+        if (m.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','receta')">🖨️ Receta Medicamentos – PDF</button>`);
+        if (est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','estudios')">🖨️ Solicitud de estudios – PDF</button>`);
+        return `<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">${b.join("")}</div>`; })()}`;
     html += `<div style="border:1px solid var(--borde); border-radius:10px; margin-bottom:10px; overflow:hidden">
       <div onclick="toggleConsulta(${idx})" style="cursor:pointer; padding:10px 12px; background:var(--fondo); display:flex; align-items:center; gap:8px">
         <span id="chev${idx}" style="color:var(--gris); flex-shrink:0">${abierta ? "▾" : "▸"}</span>
@@ -1466,6 +1645,7 @@ function abrirModalConsulta(idEditar) {
   dibujarMeds();
   calcIMC();
   dibujarRelacionArchivos();
+  actualizarHoraCitaLigada(p.id);
   $("modalConsulta").classList.add("visible");
 }
 
@@ -1862,6 +2042,7 @@ async function guardarConsulta() {
   }
   await escribirJSON("consultas.json", actuales);
   consultas = actuales;
+  await sincronizarCitaDeConsulta(p, campos.date, editandoId);
   consultaEditandoId = null;
   $("modalConsulta").classList.remove("visible");
   renderHistoria();
