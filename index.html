@@ -148,8 +148,14 @@
 </nav>
 
 <div class="main">
-  <div class="titulo">☁️ Consola en la Nube</div>
-  <div class="subtitulo-pag" id="estadoConexion">Sin conectar</div>
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px">
+    <div>
+      <div class="titulo">☁️ Consola en la Nube</div>
+      <div class="subtitulo-pag" id="estadoConexion">Sin conectar</div>
+    </div>
+    <div id="selloVersion" title="Fecha y hora del archivo de la consola que está cargado.&#10;Si no coincide con la última actualización, recarga con Cmd+Shift+R."
+         style="font-size:11px; color:var(--gris); text-align:right; line-height:1.4; white-space:nowrap; padding-top:6px"></div>
+  </div>
 
 <div class="contenedor">
 
@@ -972,6 +978,17 @@ function normalizar(t) {
 
 // ---------- Agenda ----------
 let modoAgenda = "mes";   // al conectar, lo primero que se ve es el mes completo
+// Versión de la consola: fecha y hora del propio archivo, para saber de un
+// vistazo si lo que se está viendo es la última versión publicada.
+(function selloDeVersion() {
+  const el = document.getElementById("selloVersion");
+  if (!el) return;
+  const d = new Date(document.lastModified);
+  const p = (n) => String(n).padStart(2, "0");
+  const txt = isNaN(d) ? "" : `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  el.innerHTML = `<b>Consola en la Nube</b>` + (txt ? `<br>versión ${txt}` : "");
+})();
+
 const DOW = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 function setModo(m) {
