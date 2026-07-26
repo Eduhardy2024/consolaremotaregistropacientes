@@ -284,6 +284,7 @@
     <div class="acciones-modal">
       <button class="secundario" onclick="cerrarModales()">Cancelar</button>
       <div style="display:flex; gap:8px">
+        <button class="peligro" id="btnEliminarCita" style="display:none" onclick="eliminarCitaDesdeModal()">🗑️ Eliminar cita</button>
         <button class="secundario" id="btnHistoriaCita" onclick="verHistoriaDesdeCita()">🩺 Ver historia clínica</button>
         <button class="primario" id="btnGuardarCita" onclick="guardarCita()">Guardar cita</button>
       </div>
@@ -295,11 +296,11 @@
 <div class="modal-fondo" id="modalPaciente">
   <div class="modal">
     <h2 id="tituloModalPaciente">Nuevo paciente</h2>
+    <div class="campo"><label>Nombre(s) *</label><input id="pacNombres"></div>
     <div class="dos-columnas">
       <div class="campo"><label>Apellido paterno *</label><input id="pacApPaterno"></div>
       <div class="campo"><label>Apellido materno (opcional)</label><input id="pacApMaterno"></div>
     </div>
-    <div class="campo"><label>Nombre(s) *</label><input id="pacNombres"></div>
     <div class="dos-columnas">
       <div class="campo"><label>RFC</label><input id="pacId"></div>
       <div class="campo"><label>CURP</label><input id="pacCurp" placeholder="Pendiente de capturar"></div>
@@ -987,6 +988,20 @@ function finCita(hora) {
   return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
 }
 // Teléfono en formato ##-####-#### (10 dígitos). Si no cuadra, se deja igual.
+// Insignias para la agenda: "1ª vez" (paciente sin consultas previas) y
+// Banco de México, igual que en la app de la doctora.
+function esPrimeraVezCita(c) {
+  const cons = consultas.filter((x) => x.patientId === c.patientId);
+  if (!cons.length) return true;
+  return cons.length === 1 && String(cons[0].date).slice(0,10) === String(c.date).slice(0,10);
+}
+function insigniasCita(c) {
+  const p = pacientes.find((x) => x.id === c.patientId);
+  let h = "";
+  if (esPrimeraVezCita(c)) h += ` <span style="background:#f97316; color:#fff; font-size:9px; font-weight:700; padding:1px 5px; border-radius:9px; white-space:nowrap">1ª vez</span>`;
+  if (p && p.bancoMexico) h += ` <span title="Paciente de Banco de México" style="color:#2563eb">🏛️</span>`;
+  return h;
+}
 function telFormateado(tel) {
   const d = String(tel || "").replace(/\D/g, "");
   if (d.length === 10) return d.slice(0,2) + "-" + d.slice(2,6) + "-" + d.slice(6);
@@ -1017,7 +1032,7 @@ function dibujarMes() {
     const esHoy = fecha === hoy();
     // Al pasar el mouse por el día (o por el "+N más") se ven todas las citas
     const listaDia = cs.map(c=>escapar(c.time + "  " + nombrePac(c.patientId))).join("\n");
-    let citasHtml = cs.slice(0,3).map(c=>`<div class="cal-cita" title="${escapar(c.time)} ${escapar(nombrePac(c.patientId))}">${escapar(c.time)} ${escapar(nombrePac(c.patientId).split(" ")[0])}</div>`).join("");
+    let citasHtml = cs.slice(0,3).map(c=>`<div class="cal-cita" title="${escapar(c.time)} ${escapar(nombrePac(c.patientId))}">${escapar(c.time)} ${escapar(nombrePac(c.patientId).split(" ")[0])}${insigniasCita(c)}</div>`).join("");
     if (cs.length>3) citasHtml += `<div class="cal-cita" style="background:#ccfbf1; font-weight:600">+${cs.length-3} más</div>`;
     // Clic en un día: primero a la vista de la semana (de ahí, clic en el día lleva al detalle)
     html += `<div class="cal-dia${esHoy?" hoy":""}" title="${listaDia}" onclick="$('fechaAgenda').value='${fecha}';setModo('semana')">
@@ -1026,6 +1041,56 @@ function dibujarMes() {
   $("listaCitas").innerHTML = html + "</div>";
 }
 
+// Panel lateral (vista semana): citas del día elegido, con navegación de día.
+function panelDiaLateral(fecha) {
+  const cs = citasDe(fecha);
+  const d = new Date(fecha + "T12:00:00");
+  const titulo = `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
+  let h = `<div style="display:flex; align-items:center; gap:6px; margin-bottom:10px">
+      <button class="secundario" style="padding:3px 9px" onclick="moverDiaLateral(-1)">←</button>
+      <b style="flex:1; text-align:center; font-size:13px">${escapar(titulo)}</b>
+      <button class="secundario" style="padding:3px 9px" onclick="moverDiaLateral(1)">→</button>
+    </div>`;
+  if (!cs.length) return h + `<div style="font-size:12px; color:var(--gris); text-align:center; padding:16px 0">Sin citas este día.</div>`;
+  h += cs.map((c) => {
+    const p = pacientes.find((x) => x.id === c.patientId);
+    const tel = p && p.phone ? telFormateado(p.phone) : "";
+    return `<div style="border-bottom:1px solid var(--borde); padding:8px 0">
+      <div style="display:flex; gap:8px; align-items:baseline">
+        <b style="font-size:12px; white-space:nowrap">${escapar(rangoCita(c))}</b>
+        <div style="flex:1; min-width:0">
+          <div style="font-size:13px; font-weight:600">${escapar(nombrePac(c.patientId))}${insigniasCita(c)}</div>
+          ${tel ? `<div style="font-size:11px; color:var(--gris)">${escapar(tel)}</div>` : ""}
+          ${c.notes ? `<div style="font-size:11px; color:var(--gris)">${escapar(c.notes)}</div>` : ""}
+        </div>
+      </div>
+      <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap">
+        <button class="secundario" style="font-size:11px; padding:3px 8px" onclick="abrirHistoria('${c.patientId}')">Historia Clínica</button>
+        <button class="secundario" style="font-size:11px; padding:3px 8px" onclick="consultaDesdeCitaLateral('${c.id}')">${consultaDeCitaId(c.id) ? "Consulta" : "Crear consulta"}</button>
+        <button class="secundario" style="font-size:11px; padding:3px 8px" onclick="abrirModalCita('${c.id}')">Editar</button>
+      </div>
+    </div>`;
+  }).join("");
+  return h;
+}
+function moverDiaLateral(delta) {
+  const d = new Date($("fechaAgenda").value + "T12:00:00");
+  d.setDate(d.getDate() + delta);
+  $("fechaAgenda").value = d.toISOString().slice(0, 10);
+  dibujarAgenda();
+}
+function consultaDeCitaId(citaId) {
+  const c = citas.find((x) => x.id === citaId); if (!c) return null;
+  return consultas.find((x) => x.patientId === c.patientId && String(x.date).slice(0,10) === String(c.date).slice(0,10)) || null;
+}
+// Abre la consulta de esa cita; si no existe, abre el alta de consulta.
+function consultaDesdeCitaLateral(citaId) {
+  const c = citas.find((x) => x.id === citaId); if (!c) return;
+  const existente = consultaDeCitaId(citaId);
+  abrirHistoria(c.patientId);
+  if (existente) abrirModalConsulta(existente.id);
+  else { abrirModalConsulta(); $("conFecha").value = String(c.date).slice(0,10); actualizarHoraCitaLigada(c.patientId); }
+}
 function dibujarSemana() {
   const base = new Date($("fechaAgenda").value + "T12:00:00");
   const lunes = new Date(base); lunes.setDate(base.getDate() - ((base.getDay()+6)%7));
@@ -1040,10 +1105,18 @@ function dibujarSemana() {
     html += `<div>
       <div class="cal-dow" style="cursor:pointer" onclick="$('fechaAgenda').value='${fecha}';setModo('dia')"><b>${DOW[i]} ${dia.getDate()}</b></div>
       <div class="sem-col" ${esHoy?'style="border-color:var(--azul)"':''}>
-        ${cs.length? cs.map(c=>`<div class="sem-cita" onclick="abrirModalCita('${c.id}')"><b>${escapar(rangoCita(c))}</b> ${escapar(nombrePac(c.patientId))}</div>`).join("") : '<div style="font-size:11px;color:var(--gris);text-align:center;padding-top:20px">—</div>'}
+        ${cs.length? cs.map(c=>`<div class="sem-cita" onclick="abrirModalCita('${c.id}')"><b>${escapar(rangoCita(c))}</b> ${escapar(nombrePac(c.patientId))}${insigniasCita(c)}</div>`).join("") : '<div style="font-size:11px;color:var(--gris);text-align:center;padding-top:20px">—</div>'}
       </div></div>`;
   }
-  $("listaCitas").innerHTML = html + "</div>";
+  html += "</div>";
+  // Panel lateral con las citas del día seleccionado (como en la app de la doctora)
+  $("listaCitas").innerHTML =
+    `<div style="display:flex; gap:12px; align-items:flex-start">
+       <div style="flex:1; min-width:0">${html}</div>
+       <div style="width:290px; flex-shrink:0; border-left:1px solid var(--borde); padding-left:12px">
+         ${panelDiaLateral($("fechaAgenda").value)}
+       </div>
+     </div>`;
 }
 
 function dibujarDia() {
@@ -1059,7 +1132,7 @@ function dibujarDia() {
   for (const c of delDia) {
     html += `<tr>
       <td><b>${escapar(rangoCita(c))}</b></td>
-      <td>${nombreClic(c.patientId)}${(() => {
+      <td>${nombreClic(c.patientId)}${insigniasCita(c)}${(() => {
         const p = pacientes.find((x) => x.id === c.patientId);
         const t = p && p.phone ? telFormateado(p.phone) : "";
         return t ? `<div style="font-size:12px; color:var(--gris); margin-top:2px">${escapar(t)}</div>` : "";
@@ -1096,7 +1169,17 @@ function abrirModalCita(id) {
     $("citaEstado").value = "Pendiente";
     $("citaNotas").value = "";
   }
+  const bE = $("btnEliminarCita");
+  if (bE) bE.style.display = id ? "" : "none";
   $("modalCita").classList.add("visible");
+}
+
+// Elimina la cita que se está editando (desde el propio modal).
+async function eliminarCitaDesdeModal() {
+  if (!citaEditandoId) return;
+  const id = citaEditandoId;
+  $("modalCita").classList.remove("visible");
+  await eliminarCita(id);
 }
 
 function verHistoriaDesdeCita() {
@@ -1121,7 +1204,7 @@ async function guardarCita() {
   if (!paciente) {
     // No está en la base: ofrecer registrarlo aquí mismo y volver a la cita.
     if (!nombre) { alert("Escribe el nombre del paciente."); return; }
-    if (confirm(`"${nombre}" no está registrado.\n\n¿Quieres registrarlo ahora? Al guardarlo regresarás a esta cita.`)) {
+    if (await confirmar(`"${nombre}" no está registrado.\n\n¿Quieres registrarlo ahora? Al guardarlo regresarás a esta cita.`, "Paciente no registrado", "Registrarlo")) {
       citaPendienteTrasPaciente = {
         fecha: $("citaFecha").value, hora: $("citaHora").value,
         estado: $("citaEstado").value, notas: $("citaNotas").value, citaId: citaEditandoId,
@@ -1725,7 +1808,7 @@ async function guardarPaciente() {
   // Aviso de posible duplicado al dar de alta (no bloquea, solo confirma).
   if (!pacienteEditandoId) {
     const igual = pacientes.find((p) => normalizar(p.name) === normalizar(nombre));
-    if (igual && !confirm(`Ya existe un paciente llamado "${igual.name}".\n\n¿Aun así quieres registrar uno nuevo?`)) return;
+    if (igual && !(await confirmar(`Ya existe un paciente llamado "${igual.name}".\n\n¿Aun así quieres registrar uno nuevo?`, "Posible duplicado", "Registrar de todos modos"))) return;
   }
   guardandoPaciente = true;
   marcarGuardando('btnGuardarPaciente', true);
@@ -1734,11 +1817,11 @@ async function guardarPaciente() {
   const facturacion = $("pacFactura").checked;
   const fiscalIgual = $("pacFiscalIgual").checked;
   const campos = {
-    name: nombre,
-    paternalSurname: paterno,
-    maternalSurname: materno,
-    givenNames: nombres,
-    rutOrId: $("pacId").value.trim(),
+    name: nombre.toUpperCase(),
+    paternalSurname: paterno.toUpperCase(),
+    maternalSurname: materno.toUpperCase(),
+    givenNames: nombres.toUpperCase(),
+    rutOrId: $("pacId").value.trim().toUpperCase(),
     curp: $("pacCurp").value.trim().toUpperCase(),
     birthDate: $("pacNacimiento").value,
     gender: $("pacGenero").value,
@@ -1746,8 +1829,8 @@ async function guardarPaciente() {
     phone: $("pacTelefono").value.trim(),
     phone2: $("pacTelefono2").value.trim(),
     email: $("pacCorreo").value.trim(),
-    address: $("pacDomicilio").value.trim(),
-    allergies: $("pacAlergias").value.trim(),
+    address: $("pacDomicilio").value.trim().toUpperCase(),
+    allergies: $("pacAlergias").value.trim().toUpperCase(),
     bancoMexico: $("pacBanco").checked,
     bancoMexicoNumero: $("pacBanco").checked ? $("pacBancoNum").value.trim() : "",
     avisoPrivacidad: $("pacAviso").checked,
@@ -1755,7 +1838,7 @@ async function guardarPaciente() {
     wantsInvoice: facturacion,
     rfc: facturacion ? $("pacRfc").value.trim().toUpperCase() : "",
     taxAddressIsSame: facturacion ? fiscalIgual : true,
-    taxAddress: facturacion && !fiscalIgual ? $("pacDireccionFiscal").value.trim() : "",
+    taxAddress: facturacion && !fiscalIgual ? $("pacDireccionFiscal").value.trim().toUpperCase() : "",
     updatedAt: new Date().toISOString(),
   };
   if (pacienteEditandoId) {
@@ -1840,6 +1923,29 @@ function tituloInterpretacion(c) {
 }
 // Pregunta con dos botones si el documento va con firma o sin firma.
 // Devuelve true (con), false (sin) o null (canceló).
+// Confirmación con el estilo de la app (evita el aviso del navegador que
+// muestra el dominio). Devuelve una promesa: true = aceptar, false = cancelar.
+function confirmar(mensaje, titulo, textoOk) {
+  return new Promise((resolve) => {
+    const fondo = document.createElement("div");
+    fondo.className = "modal-fondo visible";
+    fondo.style.zIndex = "95";
+    fondo.innerHTML = `<div class="modal" style="width:430px">
+      <h2 style="margin-bottom:8px">${escapar(titulo || "Confirmar")}</h2>
+      <p style="color:var(--gris); margin-bottom:18px; line-height:1.5; white-space:pre-line">${escapar(mensaje)}</p>
+      <div style="display:flex; gap:10px; justify-content:flex-end">
+        <button class="secundario" data-r="no">Cancelar</button>
+        <button class="primario" data-r="si">${escapar(textoOk || "Aceptar")}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(fondo);
+    const cerrar = (v) => { fondo.remove(); resolve(v); };
+    fondo.querySelector('[data-r="si"]').onclick = () => cerrar(true);
+    fondo.querySelector('[data-r="no"]').onclick = () => cerrar(false);
+    fondo.addEventListener("mousedown", (e) => { if (e.target === fondo) cerrar(false); });
+  });
+}
+
 function preguntarFirma(etiqueta) {
   return new Promise((resolve) => {
     const fondo = document.createElement("div");
@@ -1901,11 +2007,13 @@ function encabezadoMembrete(mem) {
 }
 function abrirImpresion(titulo, inner) {
   const doc = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${escapar(titulo)}</title>${estilosImpresion()}</head>
-    <body onload="setTimeout(function(){ window.focus(); window.print(); }, 350)">
-      <div class="noimprimir" style="background:#eef; padding:8px 12px; font-size:13px; text-align:center">
-        Se abrirá el cuadro de impresión. Elige <b>«Guardar como PDF»</b> o tu impresora.
-        <button onclick="window.print()">Imprimir de nuevo</button>
-        <button onclick="window.close()">Cerrar ventana</button>
+    <body onload="window.focus()">
+      <div class="noimprimir" style="position:sticky; top:0; background:#eef; padding:10px 14px; font-size:13px; text-align:center; border-bottom:1px solid #ccd">
+        <b>Vista previa</b> — revisa el documento y luego elige qué hacer.
+        <div style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+          <button onclick="window.print()" style="padding:6px 14px; font-size:13px; font-weight:600">🖨️ Guardar PDF o imprimir</button>
+          <button onclick="window.close()" style="padding:6px 14px; font-size:13px">Cerrar sin guardar</button>
+        </div>
       </div>
       <div style="padding: 4px 2px">${inner}</div>
     </body></html>`;
@@ -2033,11 +2141,13 @@ async function imprimirDocumento(consultaId, tipo) {
       .firma .linea { border-top: 1px solid #333; width: 260px; margin: 4px auto 0; padding-top: 3px; font-size: 12px; }
       @media print { .noimprimir { display: none; } }
     </style></head>
-    <body onload="setTimeout(function(){ window.focus(); window.print(); }, 350)">
-      <div class="noimprimir" style="background:#eef; padding:8px 12px; font-size:13px; text-align:center">
-        Se abrirá el cuadro de impresión. Elige <b>«Guardar como PDF»</b> o tu impresora.
-        <button onclick="window.print()">Imprimir de nuevo</button>
-        <button onclick="window.close()">Cerrar ventana</button>
+    <body onload="window.focus()">
+      <div class="noimprimir" style="position:sticky; top:0; background:#eef; padding:10px 14px; font-size:13px; text-align:center; border-bottom:1px solid #ccd">
+        <b>Vista previa</b> — revisa el documento y luego elige qué hacer.
+        <div style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+          <button onclick="window.print()" style="padding:6px 14px; font-size:13px; font-weight:600">🖨️ Guardar PDF o imprimir</button>
+          <button onclick="window.close()" style="padding:6px 14px; font-size:13px">Cerrar sin guardar</button>
+        </div>
       </div>
       <div style="padding: 4px 2px">
         <div class="nombre">${escapar(nombre)}${mem.especialidadDataURL ? "" : `<span class="esp">${escapar(especialidad)}</span>`}</div>
