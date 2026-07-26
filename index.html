@@ -340,7 +340,7 @@
       <input type="date" id="pacAvisoFecha">
     </div>
     <div class="campo" style="margin-top:2px">
-      <button type="button" class="secundario" onclick="abrirFirmaAviso()">🖊️ Firmar en pantalla y generar PDF</button>
+      <button type="button" class="secundario" id="btnFirmarAviso" onclick="abrirFirmaAviso()">🖊️ Firmar en pantalla y generar PDF</button>
       <div id="pacAvisoArchivo" style="font-size:12px; margin-top:6px"></div>
     </div>
 
@@ -538,6 +538,9 @@ let medsConsulta = [];
 let relacionArchivos = {};   // nombre de archivo → estudio de la cita anterior al que corresponde
 let relacionArchivosNombres = [];   // orden de los archivos mostrados en el menú de relación
 let citaLigadaConsultaId = null;    // cita (mismo paciente y día) ligada a la consulta abierta
+let citaPendienteTrasPaciente = null;   // cita que se estaba capturando cuando se registró un paciente nuevo
+let guardandoPaciente = false;          // evita doble guardado de paciente
+let guardandoCita = false;              // evita doble guardado de cita
 
 // Lunes (yyyy-mm-dd) de la semana de una fecha, para comparar "misma semana".
 function lunesDe(fechaStr) {
@@ -1088,9 +1091,31 @@ function verHistoriaDesdeCita() {
 async function guardarCita() {
   const nombre = $("citaPaciente").value.trim();
   const paciente = pacientes.find((p) => normalizar(p.name) === normalizar(nombre));
-  if (!paciente) { alert("Elige un paciente de la lista (escríbelo y selecciónalo)."); return; }
+  if (!paciente) {
+    // No está en la base: ofrecer registrarlo aquí mismo y volver a la cita.
+    if (!nombre) { alert("Escribe el nombre del paciente."); return; }
+    if (confirm(`"${nombre}" no está registrado.\n\n¿Quieres registrarlo ahora? Al guardarlo regresarás a esta cita.`)) {
+      citaPendienteTrasPaciente = {
+        fecha: $("citaFecha").value, hora: $("citaHora").value,
+        estado: $("citaEstado").value, notas: $("citaNotas").value, citaId: citaEditandoId,
+      };
+      $("modalCita").classList.remove("visible");
+      abrirModalPaciente();
+      const partes = nombre.trim().split(/\s+/);
+      if (partes.length === 1) { $("pacNombres").value = partes[0]; }
+      else if (partes.length === 2) { $("pacNombres").value = partes[0]; $("pacApPaterno").value = partes[1]; }
+      else {
+        $("pacApPaterno").value = partes[partes.length - 2];
+        $("pacApMaterno").value = partes[partes.length - 1];
+        $("pacNombres").value = partes.slice(0, partes.length - 2).join(" ");
+      }
+    }
+    return;
+  }
   if (!$("citaFecha").value || !$("citaHora").value) { alert("Falta la fecha o la hora."); return; }
-
+  if (guardandoCita) return;   // evita duplicar la cita por doble toque
+  guardandoCita = true;
+  try {
   // Releer el archivo justo antes de escribir, para no pisar cambios de la doctora
   const actuales = await leerJSON("citas.json");
   if (citaEditandoId) {
@@ -1107,6 +1132,9 @@ async function guardarCita() {
   citas = actuales;
   cerrarModales();
   dibujarTodo();
+  } catch (e) {
+    alert("No se pudo guardar la cita: " + (e && e.message ? e.message : e));
+  } finally { guardandoCita = false; }
 }
 
 async function cambiarEstado(id, estado) {
@@ -1164,8 +1192,17 @@ function dibujarPacientes() {
     $("listaPacientes").innerHTML = '<div class="vacio">Sin resultados con estos filtros.</div>';
     return;
   }
-  let html = "<table><tr><th>Nombre</th><th>RFC</th><th>Teléfono</th><th>Nacimiento</th><th></th></tr>";
-  for (const p of lista) {
+  // Con ~2000 pacientes, dibujar toda la tabla en cada tecla hace lenta la
+  // búsqueda (sobre todo en iPad): se muestran los primeros y se avisa el total.
+  const TOPE = 300;
+  const total = lista.length;
+  const visibles = lista.slice(0, TOPE);
+  let html = "";
+  if (total > TOPE) {
+    html += `<div style="font-size:12px; color:var(--gris); margin-bottom:6px">Mostrando ${TOPE} de ${total} pacientes · afina la búsqueda o los filtros para ver el resto.</div>`;
+  }
+  html += "<table><tr><th>Nombre</th><th>RFC</th><th>Teléfono</th><th>Nacimiento</th><th></th></tr>";
+  for (const p of visibles) {
     html += `<tr>
       <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a></td>
       <td>${escapar(p.rutOrId)}</td>
@@ -1288,17 +1325,30 @@ function avisoBloqueTexto(s) {
           .replace("@ARCO", AVISO_PRIVACIDAD.responsable.correoARCO);
 }
 
-// Pinta en el formulario del paciente el estado del PDF firmado
+// Pinta en el formulario del paciente el estado del PDF firmado.
+// Si ya hay un PDF, se oculta el botón de firmar (hay que borrarlo primero).
 function mostrarAvisoArchivo(nombre) {
   const cont = $("pacAvisoArchivo");
   if (!cont) return;
+  const btn = $("btnFirmarAviso");
   if (nombre) {
+    if (btn) btn.style.display = "none";
+    const seg = escapar(nombre).replace(/'/g, "\\'");
     cont.innerHTML = "<span style='color:#16a34a'>✓ PDF firmado:</span> "
-      + "<a href='#' onclick=\"verAvisoPDF('" + escapar(nombre).replace(/'/g, "\\'") + "'); return false;\">"
-      + escapar(nombre) + "</a>";
+      + "<a href='#' onclick=\"verAvisoPDF('" + seg + "'); return false;\">" + escapar(nombre) + "</a> "
+      + "<button type='button' class='secundario' style='padding:2px 9px; margin-left:6px' "
+      + "title='Eliminar el aviso firmado' onclick='eliminarAvisoFirmado()'>🗑️ Eliminar</button>";
   } else {
+    if (btn) btn.style.display = "";
     cont.innerHTML = "<span style='color:var(--gris)'>Sin PDF firmado todavía.</span>";
   }
+}
+
+// Datos del paciente que el aviso requiere; devuelve las etiquetas faltantes.
+function camposFaltantesAviso(p) {
+  const req = [["curp", "CURP"], ["birthDate", "Fecha de nacimiento"], ["gender", "Sexo"],
+    ["address", "Domicilio"], ["phone", "Teléfono"]];
+  return req.filter(([k]) => !String(p[k] || "").trim()).map(([, et]) => et);
 }
 
 // ---- Apertura del modal de firma ----
@@ -1310,6 +1360,18 @@ function abrirFirmaAviso() {
   }
   const p = pacientes.find((x) => x.id === pacienteEditandoId);
   if (!p) { alert("No encontré al paciente. Guárdalo y reintenta."); return; }
+  // No permitir firmar otro si ya hay uno: primero se elimina el actual.
+  if (p.avisoPrivacidadArchivo) {
+    alert("Este paciente ya tiene un aviso de privacidad firmado:\n" + p.avisoPrivacidadArchivo
+      + "\n\nPara generar uno nuevo, elimina primero el actual con el botón 🗑️ Eliminar.");
+    return;
+  }
+  // Avisar si faltan datos requeridos del paciente (CURP, etc.).
+  const faltan = camposFaltantesAviso(p);
+  if (faltan.length && !confirm("Faltan datos del paciente que el aviso requiere:\n\n• "
+      + faltan.join("\n• ") + "\n\nLo recomendable es capturarlos antes de firmar. ¿Deseas continuar de todos modos?")) {
+    return;
+  }
   $("firmaNombrePac").textContent = p.name || "—";
   $("firmaVersion").textContent = AVISO_PRIVACIDAD.version;
   // Texto del aviso en pantalla
@@ -1498,6 +1560,46 @@ async function verAvisoPDF(nombre) {
   }
 }
 
+// ---- Borra el PDF de aviso en OneDrive (si existe) ----
+async function borrarAviso(nombre) {
+  const token = await obtenerToken();
+  if (!token) { sesionCaducada(); throw new Error("sesión caducada"); }
+  const url = urlGraphDe("AvisosPrivacidad/" + nombre).replace(/:\/content$/, "");
+  const r = await fetch(url, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
+  if (!r.ok && r.status !== 404) throw new Error("OneDrive código " + r.status);
+}
+
+// ---- Elimina el aviso firmado del paciente (bote de basura) ----
+async function eliminarAvisoFirmado() {
+  if (!pacienteEditandoId) return;
+  const p = pacientes.find((x) => x.id === pacienteEditandoId);
+  if (!p || !p.avisoPrivacidadArchivo) return;
+  const nombre = p.avisoPrivacidadArchivo;
+  if (!confirm("¿Eliminar el aviso de privacidad firmado de este paciente?\n\nArchivo: " + nombre
+    + "\n\nEsta acción no se puede deshacer.")) return;
+  try {
+    await borrarAviso(nombre);
+    const lista = await leerJSON("pacientes.json");
+    const i = lista.findIndex((x) => x.id === p.id);
+    if (i >= 0) {
+      lista[i].avisoPrivacidad = false;
+      lista[i].avisoPrivacidadFecha = "";
+      lista[i].avisoPrivacidadArchivo = "";
+      lista[i].updatedAt = new Date().toISOString();
+      await escribirJSON("pacientes.json", lista);
+      pacientes = lista;
+    }
+    $("pacAviso").checked = false;
+    $("pacAvisoFecha").value = "";
+    alternarAviso();
+    mostrarAvisoArchivo("");
+    dibujarTodo();
+    alert("Aviso de privacidad eliminado.");
+  } catch (e) {
+    alert("No se pudo eliminar el aviso: " + e.message);
+  }
+}
+
 // ---- Guardar firma: genera PDF, lo sube y actualiza al paciente ----
 async function guardarFirmaAviso() {
   if (!$("firmaConsentNec").checked) {
@@ -1590,6 +1692,15 @@ async function guardarPaciente() {
   }
   const nombre = [nombres, paterno, materno].filter(Boolean).join(" ");
 
+  // Evita doble guardado (toque repetido mientras sube a la nube → duplicados).
+  if (guardandoPaciente) return;
+  // Aviso de posible duplicado al dar de alta (no bloquea, solo confirma).
+  if (!pacienteEditandoId) {
+    const igual = pacientes.find((p) => normalizar(p.name) === normalizar(nombre));
+    if (igual && !confirm(`Ya existe un paciente llamado "${igual.name}".\n\n¿Aun así quieres registrar uno nuevo?`)) return;
+  }
+  guardandoPaciente = true;
+  try {
   const actuales = await leerJSON("pacientes.json");
   const facturacion = $("pacFactura").checked;
   const fiscalIgual = $("pacFiscalIgual").checked;
@@ -1630,7 +1741,13 @@ async function guardarPaciente() {
       ...campos,
     });
   }
-  await escribirJSON("pacientes.json", actuales);
+  try {
+    await escribirJSON("pacientes.json", actuales);
+  } catch (e) {
+    alert("No se pudo guardar el paciente: " + (e && e.message ? e.message : e)
+      + "\n\nRevisa la conexión con la carpeta de Datos e inténtalo de nuevo.");
+    return;
+  }
   pacientes = actuales;
   $("modalPaciente").classList.remove("visible");
   // Si se editó desde la historia, ésta sigue abierta: refrescar su encabezado.
@@ -1638,6 +1755,18 @@ async function guardarPaciente() {
     abrirHistoria(pacienteEditandoId);
   }
   dibujarTodo();
+  // Si veníamos de agendar una cita, regresar a ella con el paciente ya registrado.
+  if (citaPendienteTrasPaciente) {
+    const pend = citaPendienteTrasPaciente;
+    citaPendienteTrasPaciente = null;
+    abrirModalCita(pend.citaId || null);
+    $("citaPaciente").value = nombre;
+    if (pend.fecha) $("citaFecha").value = pend.fecha;
+    if (pend.hora) $("citaHora").value = pend.hora;
+    if (pend.estado) $("citaEstado").value = pend.estado;
+    if (pend.notas) $("citaNotas").value = pend.notas;
+  }
+  } finally { guardandoPaciente = false; }
 }
 
 // ---------- Historia clínica ----------
@@ -1733,8 +1862,11 @@ function estilosImpresion() {
   </style>`;
 }
 function encabezadoMembrete(mem) {
-  return `<div class="nombre">${escapar(mem.nombre||"")}<span class="esp">${escapar(mem.especialidad||"")}</span></div>
+  const tieneImgEsp = !!mem.especialidadDataURL;
+  return `<div class="nombre">${escapar(mem.nombre||"")}${tieneImgEsp ? "" : `<span class="esp">${escapar(mem.especialidad||"")}</span>`}</div>
+    ${tieneImgEsp ? `<div style="margin:1px 0 2px"><img src="${mem.especialidadDataURL}" style="height:18px; object-fit:contain"></div>` : ""}
     ${mem.universidad ? `<div style="font-size:10.5px; color:#333">Institución que expide el título: ${escapar(mem.universidad)}</div>` : ""}
+    ${mem.unidad ? `<div style="font-size:10.5px; color:#333">${escapar(String(mem.unidad).toUpperCase())}</div>` : ""}
     <div class="cols"><div>${escapar(mem.bloqueIzquierdo||"")}</div><div>${escapar(mem.bloqueDerecho||"")}</div></div>
     <hr>`;
 }
@@ -1879,8 +2011,10 @@ async function imprimirDocumento(consultaId, tipo) {
         <button onclick="window.close()">Cerrar ventana</button>
       </div>
       <div style="padding: 4px 2px">
-        <div class="nombre">${escapar(nombre)}<span class="esp">${escapar(especialidad)}</span></div>
+        <div class="nombre">${escapar(nombre)}${mem.especialidadDataURL ? "" : `<span class="esp">${escapar(especialidad)}</span>`}</div>
+        ${mem.especialidadDataURL ? `<div style="margin:1px 0 2px"><img src="${mem.especialidadDataURL}" style="height:18px; object-fit:contain"></div>` : ""}
         ${universidad ? `<div style="font-size:10.5px; color:#333">Institución que expide el título: ${escapar(universidad)}</div>` : ""}
+        ${(mem.unidad||"") ? `<div style="font-size:10.5px; color:#333">${escapar(String(mem.unidad).toUpperCase())}</div>` : ""}
         <div class="cols"><div>${escapar(bIzq)}</div><div>${escapar(bDer)}</div></div>
         <hr>
         <div class="datos"><b>Fecha:</b> ${escapar(fecha)}</div>
