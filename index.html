@@ -285,7 +285,7 @@
       <button class="secundario" onclick="cerrarModales()">Cancelar</button>
       <div style="display:flex; gap:8px">
         <button class="secundario" id="btnHistoriaCita" onclick="verHistoriaDesdeCita()">🩺 Ver historia clínica</button>
-        <button class="primario" onclick="guardarCita()">Guardar cita</button>
+        <button class="primario" id="btnGuardarCita" onclick="guardarCita()">Guardar cita</button>
       </div>
     </div>
   </div>
@@ -368,7 +368,7 @@
        se capturan en la app de la doctora. Para ver la historia clínica o registrar una consulta, usa el botón "🩺 Historia".</p>
     <div class="acciones-modal">
       <button class="secundario" onclick="document.getElementById('modalPaciente').classList.remove('visible')">Cancelar</button>
-      <button class="primario" onclick="guardarPaciente()">Guardar paciente</button>
+      <button class="primario" id="btnGuardarPaciente" onclick="guardarPaciente()">Guardar paciente</button>
     </div>
   </div>
 </div>
@@ -510,7 +510,7 @@
 
     <div class="acciones-modal">
       <button class="secundario" onclick="document.getElementById('modalConsulta').classList.remove('visible')">Cancelar</button>
-      <button class="primario" onclick="guardarConsulta()">Guardar consulta</button>
+      <button class="primario" id="btnGuardarConsulta" onclick="guardarConsulta()">Guardar consulta</button>
     </div>
   </div>
 </div>
@@ -541,6 +541,23 @@ let citaLigadaConsultaId = null;    // cita (mismo paciente y día) ligada a la 
 let citaPendienteTrasPaciente = null;   // cita que se estaba capturando cuando se registró un paciente nuevo
 let guardandoPaciente = false;          // evita doble guardado de paciente
 let guardandoCita = false;              // evita doble guardado de cita
+
+// Muestra "Guardando…" y deshabilita el botón mientras se escribe en la nube,
+// para que se note que la app está trabajando y no se toque dos veces.
+function marcarGuardando(idBoton, activo, textoOriginal) {
+  const b = document.getElementById(idBoton);
+  if (!b) return;
+  if (activo) {
+    b.dataset.txt = b.textContent;
+    b.textContent = "Guardando…";
+    b.disabled = true;
+    b.style.opacity = "0.7";
+  } else {
+    b.textContent = textoOriginal || b.dataset.txt || b.textContent;
+    b.disabled = false;
+    b.style.opacity = "";
+  }
+}
 
 // Lunes (yyyy-mm-dd) de la semana de una fecha, para comparar "misma semana".
 function lunesDe(fechaStr) {
@@ -969,6 +986,12 @@ function finCita(hora) {
   const t = (parseInt(m[1]) * 60 + parseInt(m[2]) + 30) % 1440;
   return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
 }
+// Teléfono en formato ##-####-#### (10 dígitos). Si no cuadra, se deja igual.
+function telFormateado(tel) {
+  const d = String(tel || "").replace(/\D/g, "");
+  if (d.length === 10) return d.slice(0,2) + "-" + d.slice(2,6) + "-" + d.slice(6);
+  return String(tel || "");
+}
 function rangoCita(c) { const f = finCita(c.time); return f ? c.time + "–" + f : (c.time || ""); }
 function nombrePac(id) { const p = pacientes.find(x=>x.id===id); return p ? p.name : "(eliminado)"; }
 function nombreClic(id) { return `<a href="#" onclick="abrirHistoria('${id}');return false" style="color:var(--azul); text-decoration:none">${escapar(nombrePac(id))}</a>`; }
@@ -1036,7 +1059,11 @@ function dibujarDia() {
   for (const c of delDia) {
     html += `<tr>
       <td><b>${escapar(rangoCita(c))}</b></td>
-      <td>${nombreClic(c.patientId)}</td>
+      <td>${nombreClic(c.patientId)}${(() => {
+        const p = pacientes.find((x) => x.id === c.patientId);
+        const t = p && p.phone ? telFormateado(p.phone) : "";
+        return t ? `<div style="font-size:12px; color:var(--gris); margin-top:2px">${escapar(t)}</div>` : "";
+      })()}</td>
       <td><select onchange="cambiarEstado('${c.id}', this.value)">
         ${["Pendiente", "Asistió", "No asistió", "Cancelado"]
           .map((e) => `<option ${e === c.status ? "selected" : ""}>${e}</option>`).join("")}
@@ -1115,6 +1142,7 @@ async function guardarCita() {
   if (!$("citaFecha").value || !$("citaHora").value) { alert("Falta la fecha o la hora."); return; }
   if (guardandoCita) return;   // evita duplicar la cita por doble toque
   guardandoCita = true;
+  marcarGuardando('btnGuardarCita', true);
   try {
   // Releer el archivo justo antes de escribir, para no pisar cambios de la doctora
   const actuales = await leerJSON("citas.json");
@@ -1134,7 +1162,7 @@ async function guardarCita() {
   dibujarTodo();
   } catch (e) {
     alert("No se pudo guardar la cita: " + (e && e.message ? e.message : e));
-  } finally { guardandoCita = false; }
+  } finally { guardandoCita = false; marcarGuardando('btnGuardarCita', false); }
 }
 
 async function cambiarEstado(id, estado) {
@@ -1700,6 +1728,7 @@ async function guardarPaciente() {
     if (igual && !confirm(`Ya existe un paciente llamado "${igual.name}".\n\n¿Aun así quieres registrar uno nuevo?`)) return;
   }
   guardandoPaciente = true;
+  marcarGuardando('btnGuardarPaciente', true);
   try {
   const actuales = await leerJSON("pacientes.json");
   const facturacion = $("pacFactura").checked;
@@ -1766,7 +1795,7 @@ async function guardarPaciente() {
     if (pend.estado) $("citaEstado").value = pend.estado;
     if (pend.notas) $("citaNotas").value = pend.notas;
   }
-  } finally { guardandoPaciente = false; }
+  } finally { guardandoPaciente = false; marcarGuardando('btnGuardarPaciente', false); }
 }
 
 // ---------- Historia clínica ----------
@@ -2497,6 +2526,7 @@ async function guardarConsulta() {
   // Si el formulario ya se cerró (p. ej. un clic rezagado), no hay nada que guardar
   if (!$("modalConsulta").classList.contains("visible")) return;
   guardandoConsulta = true;
+  marcarGuardando('btnGuardarConsulta', true);
   try {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
   if (!p) return;
@@ -2577,7 +2607,7 @@ async function guardarConsulta() {
   consultaEditandoId = null;
   $("modalConsulta").classList.remove("visible");
   renderHistoria();
-  } finally { guardandoConsulta = false; }
+  } finally { guardandoConsulta = false; marcarGuardando('btnGuardarConsulta', false); }
 }
 
 // ---------- Generales ----------
