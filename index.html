@@ -125,6 +125,50 @@
     /* El encabezado de la historia clínica se apila para que quepan los botones */
     #modalHistoria .modal > div:first-child { flex-direction: column; }
   }
+
+  /* ---------- Diálogos propios (sustituyen a alert/confirm del navegador) ---------- */
+  .modal.dialogo { width: 430px; }
+  .dialogo-texto { color: var(--gris); margin-bottom: 18px; line-height: 1.5; white-space: pre-line; }
+  .dialogo-botones { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+  .dialogo-botones button { min-width: 116px; }
+  /* En los diálogos, la acción destructiva va como botón sólido rojo */
+  .dialogo-botones button.peligro { background: var(--rojo); color: #fff; border: none;
+                                    padding: 9px 18px; border-radius: 8px; font-size: 14px;
+                                    font-weight: 600; cursor: pointer; }
+
+  /* ---------- Teléfono / pantallas chicas ---------- */
+  @media (max-width: 700px) {
+    .modal.dialogo { width: 100vw; }
+    .dialogo-botones { flex-direction: column-reverse; }
+    .dialogo-botones button { width: 100%; padding: 13px 0; }
+    /* Pie de los formularios: apilado y siempre a la vista */
+    .acciones-modal { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom));
+                      flex-direction: column-reverse; align-items: stretch; gap: 8px;
+                      background: #fff; margin-top: 12px;
+                      padding: 10px 0 calc(6px + env(safe-area-inset-bottom)); }
+    .acciones-modal > div { display: flex; flex-direction: column; gap: 8px; }
+    .acciones-modal button { width: 100%; padding: 13px 0; }
+    /* En la lista de pacientes, RFC y nacimiento no caben: quedan en la ficha */
+    #listaPacientes th:nth-child(2), #listaPacientes td:nth-child(2),
+    #listaPacientes th:nth-child(4), #listaPacientes td:nth-child(4) { display: none; }
+    /* Botones del encabezado de la historia clínica, a todo lo ancho */
+    #modalHistoria .modal > div:first-child > div:last-child { width: 100%; }
+    #modalHistoria .modal > div:first-child button { width: 100%; }
+  }
+
+  /* ---------- iPad (vertical y horizontal): mismo diseño, todo más tocable ---------- */
+  @media (min-width: 701px) and (max-width: 1100px) {
+    /* 16px evita que iOS haga zoom automático al tocar un campo */
+    input, select, textarea { font-size: 16px; }
+    button.primario, button.secundario, button.peligro, .pestanas button { font-size: 15px; padding: 10px 14px; }
+    .pestanas button { flex: 1; }
+    .navbtn { width: 46px; height: 46px; }
+    th, td { padding: 10px 8px; }
+    .modal { width: 92vw !important; max-width: 760px; max-height: 92vh; }
+    .modal.dialogo { max-width: 460px; }
+    .acciones-modal { position: sticky; bottom: -24px; background: #fff; padding: 12px 0 6px; margin-top: 12px; }
+    .cal-dia { min-height: 76px; }
+  }
 </style>
 </head>
 <body>
@@ -288,9 +332,10 @@
     </div>
     <div class="campo"><label>Notas</label><input id="citaNotas" placeholder="Motivo, recordatorios…"></div>
     <div class="acciones-modal">
-      <button class="secundario" onclick="cerrarModales()">Cancelar</button>
+      <button class="secundario" onclick="cerrarModalConAviso('modalCita')">Cancelar</button>
       <div style="display:flex; gap:8px">
         <button class="peligro" id="btnEliminarCita" style="display:none" onclick="eliminarCitaDesdeModal()">🗑️ Eliminar cita</button>
+        <button class="secundario" id="btnConsultaCita" style="display:none" onclick="consultaDesdeModalCita()">➕ Crear consulta</button>
         <button class="secundario" id="btnHistoriaCita" onclick="verHistoriaDesdeCita()">🩺 Ver historia clínica</button>
         <button class="primario" id="btnGuardarCita" onclick="guardarCita()">Guardar cita</button>
       </div>
@@ -335,6 +380,15 @@
       <label>Número de Banco de México</label>
       <input id="pacBancoNum">
     </div>
+    <div class="campo" id="campoBancoPerfil" style="display:none">
+      <label>Perfil del convenio (define con qué RFC se factura)</label>
+      <select id="pacBancoPerfil" onchange="alternarBancoPerfil()">
+        <option value="">Sin definir</option>
+        <option value="Empleado Activo">Empleado Activo</option>
+        <option value="Jubilado">Jubilado</option>
+      </select>
+      <div id="pacBancoPerfilNota" style="font-size:11px; color:var(--gris); margin-top:3px"></div>
+    </div>
 
     <div class="campo" style="margin-top:4px">
       <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
@@ -374,7 +428,7 @@
     <p style="font-size:12px; color:var(--gris)">Los antecedentes médicos (alergias, antecedentes personales/familiares)
        se capturan en la app de la doctora. Para ver la historia clínica o registrar una consulta, usa el botón "🩺 Historia".</p>
     <div class="acciones-modal">
-      <button class="secundario" onclick="document.getElementById('modalPaciente').classList.remove('visible')">Cancelar</button>
+      <button class="secundario" onclick="cerrarModalConAviso('modalPaciente')">Cancelar</button>
       <button class="primario" id="btnGuardarPaciente" onclick="guardarPaciente()">Guardar paciente</button>
     </div>
   </div>
@@ -423,7 +477,7 @@
     </div>
 
     <div class="acciones-modal" style="margin-top:16px">
-      <button class="secundario" onclick="document.getElementById('modalFirmaAviso').classList.remove('visible')">Cancelar</button>
+      <button class="secundario" onclick="cerrarModalConAviso('modalFirmaAviso')">Cancelar</button>
       <button class="primario" id="firmaBtnGuardar" onclick="guardarFirmaAviso()">Guardar firma y generar PDF</button>
     </div>
   </div>
@@ -515,9 +569,21 @@
       <div class="campo"><label>Monto pagado (MXN)</label><input id="conMonto" placeholder="0.00"></div>
     </div>
     <div class="campo"><label>Folio Fiscal</label><input id="conFolio" inputmode="numeric" placeholder="Número, ej. 1024 (se registra pidan factura o no)"></div>
+    <div class="campo" style="margin-bottom:6px">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" id="conFactura" onchange="alternarFacturaConsulta()"> Requiere factura
+      </label>
+    </div>
+    <div id="conFacturaDatos" style="display:none">
+      <div class="dos-columnas">
+        <div class="campo"><label>RFC para facturar</label><input id="conRfc" placeholder="RFC del receptor"></div>
+        <div class="campo"><label>Razón social</label><input id="conRazonSocial" placeholder="Nombre o razón social"></div>
+      </div>
+      <div class="campo"><label>Dirección fiscal</label><input id="conDireccionFiscal" placeholder="Domicilio fiscal del receptor"></div>
+    </div>
 
     <div class="acciones-modal">
-      <button class="secundario" onclick="document.getElementById('modalConsulta').classList.remove('visible')">Cancelar</button>
+      <button class="secundario" onclick="cerrarModalConAviso('modalConsulta')">Cancelar</button>
       <button class="primario" id="btnGuardarConsulta" onclick="guardarConsulta()">Guardar consulta</button>
     </div>
   </div>
@@ -616,14 +682,16 @@ async function sincronizarCitaDeConsulta(paciente, fecha, esEdicion) {
   if (esEdicion) return;   // al editar no se crean citas nuevas
   const pend = actualesCitas.find((c) => c.patientId === paciente.id && c.status === "Pendiente" && mismaSemana(dia, c.date));
   if (pend) {
-    if (confirm(`Hay una cita el ${fechaLarga(pend.date)} a las ${pend.time} esta semana. ¿Es de esta consulta? Se marcará como Asistió.`)) {
+    if (await confirmar(`Hay una cita el ${fechaLarga(pend.date)} a las ${pend.time} esta semana. ¿Es de esta consulta?\n\nSe marcará como "Asistió".`,
+                        "Cita de esta semana", "Sí, es de esta consulta")) {
       pend.status = "Asistió";
       await escribirJSON("citas.json", actualesCitas);
       citas = actualesCitas;
     }
     return;
   }
-  if (confirm("¿Registrar esta consulta en la agenda como cita 'Asistió'?")) {
+  if (await confirmar("¿Registrar esta consulta en la agenda como cita \"Asistió\"?",
+                      "Agregar a la agenda", "Sí, registrar")) {
     actualesCitas.push({ id: uuid(), patientId: paciente.id, date: dia,
       time: hora || "09:00", status: "Asistió", notes: $("conMotivo").value.trim() });
     await escribirJSON("citas.json", actualesCitas);
@@ -792,7 +860,7 @@ async function leerJSON(nombre) {
     // Aviso solo si la persona está guardando algo (hay un formulario abierto);
     // el refresco automático de fondo falla en silencio y reintenta después.
     if (document.querySelector(".modal-fondo.visible")) {
-      alert("No se pudo leer la base en OneDrive. Revisa tu conexión a internet e inténtalo de nuevo.");
+      avisar("No se pudo leer la base en OneDrive. Revisa tu conexión a internet e inténtalo de nuevo.");
     }
     throw new Error("No se pudo leer " + nombre);
   }
@@ -811,7 +879,7 @@ async function escribirJSON(nombre, datos) {
     if (e.message === "Sesión caducada") throw e;
   }
   if (!r || !r.ok) {
-    alert("No se pudo guardar en OneDrive. Revisa tu conexión a internet e inténtalo de nuevo.");
+    avisar("No se pudo guardar en OneDrive. Revisa tu conexión a internet e inténtalo de nuevo.");
     throw new Error("No se pudo guardar " + nombre);
   }
 }
@@ -1203,7 +1271,8 @@ function abrirModalCita(id) {
   }
   const bE = $("btnEliminarCita");
   if (bE) bE.style.display = id ? "" : "none";
-  $("modalCita").classList.add("visible");
+  actualizarBotonConsultaCita(id);
+  mostrarModal("modalCita");
 }
 
 // Elimina la cita que se está editando (desde el propio modal).
@@ -1212,6 +1281,29 @@ async function eliminarCitaDesdeModal() {
   const id = citaEditandoId;
   $("modalCita").classList.remove("visible");
   await eliminarCita(id);
+}
+
+// En una cita ya agendada: si todavía no tiene consulta ofrece crearla, y si ya
+// existe la abre. (La cita se marca "Asistió" sola al guardar la consulta.)
+function actualizarBotonConsultaCita(id) {
+  const b = $("btnConsultaCita");
+  if (!b) return;
+  if (!id) { b.style.display = "none"; return; }
+  const existente = consultaDeCitaId(id);
+  b.style.display = "";
+  b.textContent = existente ? "🩺 Ver consulta" : "➕ Crear consulta";
+  b.title = existente ? "Abrir la consulta de esta cita" : "Registrar la consulta de esta cita";
+}
+
+async function consultaDesdeModalCita() {
+  const id = citaEditandoId;
+  if (!id) return;
+  if (hayCambiosSinGuardar("modalCita")
+      && !(await confirmar("Los cambios de la cita todavía no se guardan y se perderán.",
+                           "Cambios sin guardar", "Continuar sin guardar", true))) return;
+  _modalesSucios["modalCita"] = false;
+  $("modalCita").classList.remove("visible");
+  consultaDesdeCitaLateral(id);
 }
 
 function verHistoriaDesdeCita() {
@@ -1225,7 +1317,7 @@ function verHistoriaDesdeCita() {
     const p = pacientes.find((x) => normalizar(x.name) === normalizar(nombre));
     if (p) pid = p.id;
   }
-  if (!pid) { alert("Elige o selecciona un paciente primero."); return; }
+  if (!pid) { avisar("Elige o selecciona un paciente primero."); return; }
   $("modalCita").classList.remove("visible");
   abrirHistoria(pid);
 }
@@ -1235,7 +1327,7 @@ async function guardarCita() {
   const paciente = pacientes.find((p) => normalizar(p.name) === normalizar(nombre));
   if (!paciente) {
     // No está en la base: ofrecer registrarlo aquí mismo y volver a la cita.
-    if (!nombre) { alert("Escribe el nombre del paciente."); return; }
+    if (!nombre) { avisar("Escribe el nombre del paciente."); return; }
     if (await confirmar(`"${nombre}" no está registrado.\n\n¿Quieres registrarlo ahora? Al guardarlo regresarás a esta cita.`, "Paciente no registrado", "Registrarlo")) {
       citaPendienteTrasPaciente = {
         fecha: $("citaFecha").value, hora: $("citaHora").value,
@@ -1254,7 +1346,7 @@ async function guardarCita() {
     }
     return;
   }
-  if (!$("citaFecha").value || !$("citaHora").value) { alert("Falta la fecha o la hora."); return; }
+  if (!$("citaFecha").value || !$("citaHora").value) { avisar("Falta la fecha o la hora."); return; }
   if (guardandoCita) return;   // evita duplicar la cita por doble toque
   guardandoCita = true;
   marcarGuardando('btnGuardarCita', true);
@@ -1276,7 +1368,7 @@ async function guardarCita() {
   cerrarModales();
   dibujarTodo();
   } catch (e) {
-    alert("No se pudo guardar la cita: " + (e && e.message ? e.message : e));
+    avisar("No se pudo guardar la cita: " + (e && e.message ? e.message : e));
   } finally { guardandoCita = false; marcarGuardando('btnGuardarCita', false); }
 }
 
@@ -1289,7 +1381,8 @@ async function cambiarEstado(id, estado) {
 
 async function eliminarCita(id) {
   const c = citas.find((x) => x.id === id);
-  if (!confirm(`¿Eliminar la cita de ${nombreDe(c.patientId)} a las ${c.time}?`)) return;
+  if (!(await confirmar(`¿Eliminar la cita de ${nombreDe(c.patientId)} a las ${c.time}?`,
+                        "Eliminar cita", "Sí, eliminar", true))) return;
   const actuales = (await leerJSON("citas.json")).filter((x) => x.id !== id);
   await escribirJSON("citas.json", actuales);
   citas = actuales;
@@ -1349,7 +1442,7 @@ function dibujarPacientes() {
     html += `<tr>
       <td><a href="#" onclick="abrirHistoria('${p.id}');return false" style="color:var(--azul); font-weight:700; text-decoration:none">${escapar(p.name)}</a></td>
       <td>${escapar(p.rutOrId)}</td>
-      <td>${escapar(p.phone)}</td>
+      <td style="white-space:nowrap">${escapar(telFormateado(p.phone))}</td>
       <td>${escapar(p.birthDate)}</td>
       <td style="white-space:nowrap">
         <button class="secundario" onclick="abrirHistoria('${p.id}')">🩺 Historia</button>
@@ -1388,6 +1481,7 @@ function abrirModalPaciente(id) {
   $("pacAlergias").value = p.allergies || "";
   $("pacBanco").checked = !!p.bancoMexico;
   $("pacBancoNum").value = p.bancoMexicoNumero || "";
+  $("pacBancoPerfil").value = p.bancoMexicoPerfil || perfilDeRFC(p.rfc) || "";
   alternarBanco();
   $("pacAviso").checked = !!p.avisoPrivacidad;
   $("pacAvisoFecha").value = p.avisoPrivacidadFecha || "";
@@ -1398,18 +1492,58 @@ function abrirModalPaciente(id) {
   $("pacFiscalIgual").checked = p.taxAddressIsSame !== false;
   $("pacDireccionFiscal").value = p.taxAddress || "";
   alternarFacturacion();
-  $("modalPaciente").classList.add("visible");
+  mostrarModal("modalPaciente");
 }
 
 function alternarFacturacion() {
   $("bloqueFacturacion").style.display = $("pacFactura").checked ? "block" : "none";
   alternarFiscalIgual();
 }
+// ---------- Convenio Banco de México ----------
+// Empleado activo → factura BANCO DE MEXICO con RFC BME…; jubilado → FONDO
+// COMPLEMENTARIO DE PENSIONES con RFC FCP…
+const BANCO_PERFILES = {
+  "Empleado Activo": { rfc: "BME821130SXA", razon: "BANCO DE MEXICO" },
+  "Jubilado":        { rfc: "FCP041215RN6", razon: "FONDO COMPLEMENTARIO DE PENSIONES" },
+};
+function perfilDeRFC(rfc) {
+  const r = String(rfc || "").toUpperCase().trim();
+  if (r.startsWith("BME")) return "Empleado Activo";
+  if (r.startsWith("FCP")) return "Jubilado";
+  return "";
+}
+// Perfil del paciente: el registrado o, si aún no lo tiene, el que dice su RFC.
+function convenioBanco(p) {
+  if (!p) return null;
+  const perfil = p.bancoMexicoPerfil || perfilDeRFC(p.rfc);
+  const datos = BANCO_PERFILES[perfil];
+  return datos ? { perfil, rfc: datos.rfc, razon: datos.razon } : null;
+}
+function alternarBancoPerfil() {
+  const perfil = $("pacBancoPerfil").value;
+  const datos = BANCO_PERFILES[perfil];
+  if (datos) {
+    // Al elegir el perfil se propone la facturación del convenio.
+    $("pacBancoPerfilNota").textContent = "Se factura a " + datos.razon + " con el RFC " + datos.rfc + ".";
+    $("pacFactura").checked = true;
+    alternarFacturacion();
+    $("pacRfc").value = datos.rfc;
+  } else {
+    const deducido = perfilDeRFC($("pacRfc").value);
+    $("pacBancoPerfilNota").textContent = deducido
+      ? "Por su RFC parece " + deducido + ": elígelo para dejarlo registrado."
+      : "Empleado Activo → RFC BME… · Jubilado → RFC FCP… (fondo de pensiones).";
+  }
+}
+
 function alternarFiscalIgual() {
   $("campoDireccionFiscal").style.display = $("pacFiscalIgual").checked ? "none" : "block";
 }
 function alternarBanco() {
-  $("campoBancoNum").style.display = $("pacBanco").checked ? "block" : "none";
+  const on = $("pacBanco").checked;
+  $("campoBancoNum").style.display = on ? "block" : "none";
+  $("campoBancoPerfil").style.display = on ? "block" : "none";
+  if (on) alternarBancoPerfil();
 }
 function alternarAviso() {
   const on = $("pacAviso").checked;
@@ -1496,23 +1630,24 @@ function camposFaltantesAviso(p) {
 
 // ---- Apertura del modal de firma ----
 let _firmaCtx = null, _firmaDibujo = false, _firmaHayTrazo = false;
-function abrirFirmaAviso() {
+async function abrirFirmaAviso() {
   if (!pacienteEditandoId) {
-    alert("Primero guarda al paciente (botón «Guardar paciente») y vuelve a abrirlo. La firma se archiva sobre un paciente ya registrado.");
+    avisar("Primero guarda al paciente (botón «Guardar paciente») y vuelve a abrirlo. La firma se archiva sobre un paciente ya registrado.");
     return;
   }
   const p = pacientes.find((x) => x.id === pacienteEditandoId);
-  if (!p) { alert("No encontré al paciente. Guárdalo y reintenta."); return; }
+  if (!p) { avisar("No encontré al paciente. Guárdalo y reintenta."); return; }
   // No permitir firmar otro si ya hay uno: primero se elimina el actual.
   if (p.avisoPrivacidadArchivo) {
-    alert("Este paciente ya tiene un aviso de privacidad firmado:\n" + p.avisoPrivacidadArchivo
+    avisar("Este paciente ya tiene un aviso de privacidad firmado:\n" + p.avisoPrivacidadArchivo
       + "\n\nPara generar uno nuevo, elimina primero el actual con el botón 🗑️ Eliminar.");
     return;
   }
   // Avisar si faltan datos requeridos del paciente (CURP, etc.).
   const faltan = camposFaltantesAviso(p);
-  if (faltan.length && !confirm("Faltan datos del paciente que el aviso requiere:\n\n• "
-      + faltan.join("\n• ") + "\n\nLo recomendable es capturarlos antes de firmar. ¿Deseas continuar de todos modos?")) {
+  if (faltan.length && !(await confirmar("Faltan datos del paciente que el aviso requiere:\n\n• "
+      + faltan.join("\n• ") + "\n\nLo recomendable es capturarlos antes de firmar.",
+      "Datos incompletos", "Firmar de todos modos"))) {
     return;
   }
   $("firmaNombrePac").textContent = p.name || "—";
@@ -1530,7 +1665,7 @@ function abrirFirmaAviso() {
   $("firmaConsentSec").checked = false;
   $("firmaEstado").textContent = "";
   $("firmaBtnGuardar").disabled = false;
-  $("modalFirmaAviso").classList.add("visible");
+  mostrarModal("modalFirmaAviso");
   setTimeout(prepararCanvasFirma, 60); // tras render, para medir ancho real
 }
 
@@ -1699,7 +1834,7 @@ async function verAvisoPDF(nombre) {
     const url = URL.createObjectURL(await r.blob());
     window.open(url, "_blank");
   } catch (e) {
-    alert("No pude abrir el PDF (" + e.message + ").");
+    avisar("No pude abrir el PDF (" + e.message + ").");
   }
 }
 
@@ -1718,8 +1853,8 @@ async function eliminarAvisoFirmado() {
   const p = pacientes.find((x) => x.id === pacienteEditandoId);
   if (!p || !p.avisoPrivacidadArchivo) return;
   const nombre = p.avisoPrivacidadArchivo;
-  if (!confirm("¿Eliminar el aviso de privacidad firmado de este paciente?\n\nArchivo: " + nombre
-    + "\n\nEsta acción no se puede deshacer.")) return;
+  if (!(await confirmar("¿Eliminar el aviso de privacidad firmado de este paciente?\n\nArchivo: " + nombre
+    + "\n\nEsta acción no se puede deshacer.", "Eliminar aviso firmado", "Sí, eliminar", true))) return;
   try {
     await borrarAviso(nombre);
     const lista = await leerJSON("pacientes.json");
@@ -1737,21 +1872,21 @@ async function eliminarAvisoFirmado() {
     alternarAviso();
     mostrarAvisoArchivo("");
     dibujarTodo();
-    alert("Aviso de privacidad eliminado.");
+    avisar("Aviso de privacidad eliminado.");
   } catch (e) {
-    alert("No se pudo eliminar el aviso: " + e.message);
+    avisar("No se pudo eliminar el aviso: " + e.message);
   }
 }
 
 // ---- Guardar firma: genera PDF, lo sube y actualiza al paciente ----
 async function guardarFirmaAviso() {
   if (!$("firmaConsentNec").checked) {
-    alert("El paciente debe marcar el consentimiento expreso (casilla obligatoria) para poder firmar.");
+    avisar("El paciente debe marcar el consentimiento expreso (casilla obligatoria) para poder firmar.");
     return;
   }
-  if (!_firmaHayTrazo) { alert("Falta la firma del paciente en el recuadro."); return; }
+  if (!_firmaHayTrazo) { avisar("Falta la firma del paciente en el recuadro."); return; }
   const p = pacientes.find((x) => x.id === pacienteEditandoId);
-  if (!p) { alert("No encontré al paciente."); return; }
+  if (!p) { avisar("No encontré al paciente."); return; }
 
   const btn = $("firmaBtnGuardar");
   btn.disabled = true;
@@ -1812,13 +1947,13 @@ async function guardarFirmaAviso() {
     dibujarTodo();
 
     if (enNube && descargado)
-      alert("Aviso de privacidad firmado.\nGuardado en OneDrive y descargada una copia.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
+      avisar("Aviso de privacidad firmado.\nGuardado en OneDrive y descargada una copia.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
     else if (enNube)
-      alert("Aviso de privacidad firmado y guardado en OneDrive.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
+      avisar("Aviso de privacidad firmado y guardado en OneDrive.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
     else
-      alert("Aviso firmado y DESCARGADO en este dispositivo.\n⚠️ No se pudo guardar en OneDrive (sin conexión). Archívalo manualmente en el historial y, cuando haya conexión, marca el aviso en la ficha del paciente.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
+      avisar("Aviso firmado y DESCARGADO en este dispositivo.\n⚠️ No se pudo guardar en OneDrive (sin conexión). Archívalo manualmente en el historial y, cuando haya conexión, marca el aviso en la ficha del paciente.\nFolio: " + folio + "\nArchivo: " + nombreArchivo);
   } catch (e) {
-    alert("No se pudo generar/guardar el PDF: " + e.message);
+    avisar("No se pudo generar/guardar el PDF: " + e.message);
     $("firmaEstado").textContent = "";
   } finally {
     btn.disabled = false;
@@ -1833,7 +1968,7 @@ async function eliminarPacienteDesdeHistoria() {
   const nCit = citas.filter((c) => c.patientId === p.id).length;
   const ok = await confirmar(
     `Se eliminará a "${p.name}" junto con sus ${nCon} consulta(s) y ${nCit} cita(s).\n\nEsta acción no se puede deshacer.`,
-    "Eliminar paciente", "Eliminar todo");
+    "Eliminar paciente", "Eliminar todo", true);
   if (!ok) return;
   try {
     const pac = (await leerJSON("pacientes.json")).filter((x) => x.id !== p.id);
@@ -1844,7 +1979,7 @@ async function eliminarPacienteDesdeHistoria() {
     await escribirJSON("citas.json", cit);
     pacientes = pac; consultas = con; citas = cit;
   } catch (e) {
-    alert("No se pudo eliminar: " + (e && e.message ? e.message : e));
+    avisar("No se pudo eliminar: " + (e && e.message ? e.message : e));
     return;
   }
   historiaPacienteId = null;
@@ -1857,7 +1992,7 @@ async function guardarPaciente() {
   const materno = $("pacApMaterno").value.trim();
   const nombres = $("pacNombres").value.trim();
   if (!paterno || !nombres) {
-    alert("Apellido paterno y nombre(s) son obligatorios.");
+    avisar("Apellido paterno y nombre(s) son obligatorios.");
     return;
   }
   const nombre = [nombres, paterno, materno].filter(Boolean).join(" ");
@@ -1892,6 +2027,7 @@ async function guardarPaciente() {
     allergies: $("pacAlergias").value.trim().toUpperCase(),
     bancoMexico: $("pacBanco").checked,
     bancoMexicoNumero: $("pacBanco").checked ? $("pacBancoNum").value.trim() : "",
+    bancoMexicoPerfil: $("pacBanco").checked ? $("pacBancoPerfil").value : "",
     avisoPrivacidad: $("pacAviso").checked,
     avisoPrivacidadFecha: $("pacAviso").checked ? ($("pacAvisoFecha").value || hoy()) : "",
     wantsInvoice: facturacion,
@@ -1915,7 +2051,7 @@ async function guardarPaciente() {
   try {
     await escribirJSON("pacientes.json", actuales);
   } catch (e) {
-    alert("No se pudo guardar el paciente: " + (e && e.message ? e.message : e)
+    avisar("No se pudo guardar el paciente: " + (e && e.message ? e.message : e)
       + "\n\nRevisa la conexión con la carpeta de Datos e inténtalo de nuevo.");
     return;
   }
@@ -1961,7 +2097,12 @@ function abrirHistoria(id) {
   $("histNombre").textContent = p.name;
   $("histDatos").innerHTML = [
     p.rutOrId ? "RFC: " + escapar(p.rutOrId) : "<span style='color:#d97706'>⚠ Falta RFC</span>",
-    edadDe(p.birthDate), p.gender, p.phone ? "Tel: " + escapar(p.phone) : "",
+    edadDe(p.birthDate), p.gender, p.phone ? "Tel: " + telFormateado(p.phone) : "",
+    p.bancoMexico
+      ? (convenioBanco(p)
+          ? "<span style='color:#2563eb'>🏛️ Banco de México · " + escapar(convenioBanco(p).perfil) + "</span>"
+          : "<span style='color:#d97706'>🏛️ Banco de México · ⚠ falta definir el perfil (factura con RFC equivocado)</span>")
+      : "",
     (p.curp || "").trim() ? "" : "<span style='color:#d97706'>⚠ Falta CURP</span>",
     p.avisoPrivacidad
       ? "<span style='color:#16a34a'>✓ Aviso privacidad" + (p.avisoPrivacidadFecha ? " (" + escapar(p.avisoPrivacidadFecha) + ")" : "") + "</span>"
@@ -1982,24 +2123,101 @@ function tituloInterpretacion(c) {
 }
 // Pregunta con dos botones si el documento va con firma o sin firma.
 // Devuelve true (con), false (sin) o null (canceló).
+
+// Aviso con el estilo de la app. Sustituye a window.alert, que en iPad muestra
+// el dominio de la página y no deja leer bien los mensajes largos.
+// Se puede llamar sin await: no bloquea nada.
+function avisar(mensaje, titulo) {
+  const texto = String(mensaje == null ? "" : mensaje);
+  // Mensajes que reportan un problema o un dato faltante llevan icono de atención.
+  const problema = /^\s*(no se pudo|no pude|no encontr|error|falta|faltan|captura|escribe|elige|primero|el navegador|este paciente|el paciente|esta consulta)/i.test(texto)
+    || texto.includes("⚠️");
+  return new Promise((resolve) => {
+    const fondo = document.createElement("div");
+    fondo.className = "modal-fondo visible";
+    fondo.style.zIndex = "96";
+    fondo.innerHTML = `<div class="modal dialogo">
+      <h2 style="margin-bottom:8px">${problema ? "⚠️ " : ""}${escapar(titulo || (problema ? "Atención" : "Aviso"))}</h2>
+      <p class="dialogo-texto">${escapar(texto)}</p>
+      <div class="dialogo-botones"><button class="primario" data-r="ok">Entendido</button></div>
+    </div>`;
+    document.body.appendChild(fondo);
+    const cerrar = () => { document.removeEventListener("keydown", tecla, true); fondo.remove(); resolve(); };
+    const tecla = (e) => {
+      if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); e.stopPropagation(); cerrar(); }
+    };
+    document.addEventListener("keydown", tecla, true);
+    fondo.querySelector('[data-r="ok"]').onclick = cerrar;
+    fondo.querySelector('[data-r="ok"]').focus();
+    fondo.addEventListener("mousedown", (e) => { if (e.target === fondo) cerrar(); });
+  });
+}
+
+// ---------- Aviso de cambios sin guardar ----------
+// Un formulario se marca "sucio" solo cuando la usuaria escribe o cambia algo
+// (los valores que rellena la app al abrir el modal no cuentan).
+const _modalesSucios = {};
+function mostrarModal(id) {
+  _modalesSucios[id] = false;
+  document.getElementById(id).classList.add("visible");
+}
+document.addEventListener("input", (e) => {
+  const m = e.target.closest && e.target.closest(".modal-fondo");
+  if (m && m.id) _modalesSucios[m.id] = true;
+}, true);
+document.addEventListener("change", (e) => {
+  const m = e.target.closest && e.target.closest(".modal-fondo");
+  if (m && m.id) _modalesSucios[m.id] = true;
+}, true);
+
+function hayCambiosSinGuardar(id) {
+  // La firma se dibuja en un canvas: no dispara eventos de formulario.
+  if (id === "modalFirmaAviso" && typeof _firmaHayTrazo !== "undefined" && _firmaHayTrazo) return true;
+  return !!_modalesSucios[id];
+}
+
+// Cierra un formulario avisando si hay captura sin guardar.
+async function cerrarModalConAviso(id) {
+  if (hayCambiosSinGuardar(id)) {
+    const salir = await confirmar(
+      "Lo que capturaste en este formulario se perderá si sales ahora.",
+      "Hay cambios sin guardar", "Salir sin guardar", true);
+    if (!salir) return;
+  }
+  _modalesSucios[id] = false;
+  document.getElementById(id).classList.remove("visible");
+}
+
+// El modal visible más arriba (el último de la lista en el DOM que esté abierto).
+function modalEncima() {
+  const abiertos = [...document.querySelectorAll(".modal-fondo.visible")].filter((m) => m.id);
+  return abiertos.length ? abiertos[abiertos.length - 1] : null;
+}
+
 // Confirmación con el estilo de la app (evita el aviso del navegador que
 // muestra el dominio). Devuelve una promesa: true = aceptar, false = cancelar.
-function confirmar(mensaje, titulo, textoOk) {
+function confirmar(mensaje, titulo, textoOk, peligro) {
   return new Promise((resolve) => {
     const fondo = document.createElement("div");
     fondo.className = "modal-fondo visible";
     fondo.style.zIndex = "95";
-    fondo.innerHTML = `<div class="modal" style="width:430px">
+    fondo.innerHTML = `<div class="modal dialogo">
       <h2 style="margin-bottom:8px">${escapar(titulo || "Confirmar")}</h2>
-      <p style="color:var(--gris); margin-bottom:18px; line-height:1.5; white-space:pre-line">${escapar(mensaje)}</p>
-      <div style="display:flex; gap:10px; justify-content:flex-end">
+      <p class="dialogo-texto">${escapar(mensaje)}</p>
+      <div class="dialogo-botones">
         <button class="secundario" data-r="no">Cancelar</button>
-        <button class="primario" data-r="si">${escapar(textoOk || "Aceptar")}</button>
+        <button class="${peligro ? "peligro" : "primario"}" data-r="si">${escapar(textoOk || "Aceptar")}</button>
       </div>
     </div>`;
     document.body.appendChild(fondo);
-    const cerrar = (v) => { fondo.remove(); resolve(v); };
+    const cerrar = (v) => { document.removeEventListener("keydown", tecla, true); fondo.remove(); resolve(v); };
+    const tecla = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cerrar(false); }
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); cerrar(true); }
+    };
+    document.addEventListener("keydown", tecla, true);
     fondo.querySelector('[data-r="si"]').onclick = () => cerrar(true);
+    fondo.querySelector('[data-r="si"]').focus();
     fondo.querySelector('[data-r="no"]').onclick = () => cerrar(false);
     fondo.addEventListener("mousedown", (e) => { if (e.target === fondo) cerrar(false); });
   });
@@ -2037,7 +2255,9 @@ async function cargarMembrete() {
 }
 function estilosImpresion() {
   return `<style>
-    @page { margin: 1.6cm; }
+    /* Se fuerza hoja carta: si la impresora tiene A4 por omisión, el documento
+       se recortaría o quedaría descuadrado. */
+    @page { size: letter; margin: 1.6cm; }
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
     .nombre { font-size: 20px; font-weight: 800; }
@@ -2077,7 +2297,7 @@ function abrirImpresion(titulo, inner) {
       <div style="padding: 4px 2px">${inner}</div>
     </body></html>`;
   const w = window.open("", "_blank", "width=850,height=1100");
-  if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
+  if (!w) { avisar("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
   w.document.open(); w.document.write(doc); w.document.close();
 }
 function campoNotaHTML(titulo, valor) {
@@ -2149,7 +2369,9 @@ async function imprimirHistorialClinico(pacienteId) {
 async function imprimirDocumento(consultaId, tipo) {
   const c = consultas.find((x) => x.id === consultaId);
   if (!c) return;
-  const etiqueta = tipo === "receta" ? "receta" : "solicitud de estudios";
+  const combinado = tipo === "ambos";
+  const etiqueta = combinado ? "receta de medicamentos + estudios"
+                             : (tipo === "receta" ? "receta" : "solicitud de estudios");
   const eleccion = await preguntarFirma(etiqueta);
   if (eleccion === null) return;   // canceló
   const conFirma = eleccion;
@@ -2162,27 +2384,35 @@ async function imprimirDocumento(consultaId, tipo) {
   const bIzq = mem.bloqueIzquierdo || "";
   const bDer = mem.bloqueDerecho || "";
   let firma = conFirma ? (mem.firmaDataURL || "") : "";
-  if (conFirma && !firma) alert("No hay una firma digital guardada. Se generará sin firma; súbela en la app de la doctora (Excel y Datos → Membrete) si la necesitas.");
+  if (conFirma && !firma) avisar("No hay una firma digital guardada. Se generará sin firma; súbela en la app de la doctora (Excel y Datos → Membrete) si la necesitas.");
+  // Nombre bajo la firma: si el membrete lo trae, se usa ese; si no, el del médico.
+  const nombreBajoFirma = String(mem.nombreFirma || "").trim() || nombre;
   const fecha = fechaLarga(c.date);
   const edad = edadDe(p.birthDate);
 
-  let cuerpo = "", titulo = "";
-  if (tipo === "receta") {
-    titulo = "Receta médica";
+  const cuerpoReceta = () => {
     const meds = (c.prescription && c.prescription.medications) || [];
-    cuerpo = "<ol>" + meds.map((m) => "<li><b>" + escapar(m.name) + "</b> " + escapar(m.dosage||"")
+    return "<ol>" + meds.map((m) => "<li><b>" + escapar(m.name) + "</b> " + escapar(m.dosage||"")
       + (m.frequency ? " — cada " + escapar(m.frequency) : "")
       + (m.duration ? " por " + escapar(m.duration) : "")
       + (m.notes ? "<br><span style='color:#444'>" + escapar(m.notes) + "</span>" : "") + "</li>").join("") + "</ol>";
-  } else {
-    titulo = "Solicitud de estudios de laboratorio y gabinete";
+  };
+  const cuerpoEstudios = () => {
     const est = String(c.studies || "").split("\n").map((s) => s.trim()).filter(Boolean);
-    cuerpo = "<ol>" + est.map((e) => "<li>" + escapar(e) + "</li>").join("") + "</ol>";
-  }
+    return "<ol>" + est.map((e) => "<li>" + escapar(e) + "</li>").join("") + "</ol>";
+  };
+  // Una hoja carta puede llevar los dos documentos: receta arriba y estudios abajo.
+  const bloques = combinado
+    ? [{ titulo: "Receta médica", cuerpo: cuerpoReceta() },
+       { titulo: "Solicitud de estudios de laboratorio y gabinete", cuerpo: cuerpoEstudios() }]
+    : (tipo === "receta"
+        ? [{ titulo: "Receta médica", cuerpo: cuerpoReceta() }]
+        : [{ titulo: "Solicitud de estudios de laboratorio y gabinete", cuerpo: cuerpoEstudios() }]);
+  const titulo = combinado ? "Receta Medicamentos y Estudios Laboratorio" : bloques[0].titulo;
 
   const doc = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${escapar(titulo)}</title>
     <style>
-      @page { margin: 1.6cm; }
+      @page { size: letter; margin: ${combinado ? "1.4cm" : "1.6cm"}; }
       * { box-sizing: border-box; }
       body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
       .nombre { font-size: 20px; font-weight: 800; }
@@ -2196,8 +2426,13 @@ async function imprimirDocumento(consultaId, tipo) {
       ol { font-size: 13.5px; line-height: 1.5; padding-left: 22px; }
       li { margin-bottom: 6px; }
       .firma { margin-top: 70px; text-align: center; }
-      .firma img { height: 120px; object-fit: contain; display: block; margin: 0 auto -22px; }
+      .firma img { height: 120px; object-fit: contain; display: block; margin: 0 auto -34px; }
       .firma .linea { border-top: 1px solid #333; width: 260px; margin: 4px auto 0; padding-top: 3px; font-size: 12px; }
+      /* Los dos documentos en una hoja carta: un solo membrete y la firma después
+         de lo escrito. El mínimo de media carta conserva el espacio para firmar
+         cuando la receta es corta; si hay más contenido, la firma baja con él. */
+      .hoja { display: flex; flex-direction: column; min-height: 12.5cm; }
+      .hoja .firma { margin-top: auto; padding-top: 1.4cm; }
       @media print { .noimprimir { display: none; } }
     </style></head>
     <body onload="window.focus()">
@@ -2208,7 +2443,7 @@ async function imprimirDocumento(consultaId, tipo) {
           <button onclick="window.close()" style="padding:6px 14px; font-size:13px">Cerrar sin guardar</button>
         </div>
       </div>
-      <div style="padding: 4px 2px">
+      <div class="${combinado ? "hoja" : ""}" style="padding: 4px 2px">
         <div class="nombre">${escapar(nombre)}${mem.especialidadDataURL ? "" : `<span class="esp">${escapar(especialidad)}</span>`}</div>
         ${mem.especialidadDataURL ? `<div style="margin:1px 0 2px"><img src="${mem.especialidadDataURL}" style="height:18px; object-fit:contain"></div>` : ""}
         ${universidad ? `<div style="font-size:10.5px; color:#333">Institución que expide el título: ${escapar(universidad)}</div>` : ""}
@@ -2217,17 +2452,16 @@ async function imprimirDocumento(consultaId, tipo) {
         <hr>
         <div class="datos"><b>Fecha:</b> ${escapar(fecha)}</div>
         <div class="datos"><b>Paciente:</b> ${escapar(p.name || "")}${edad ? " &nbsp;·&nbsp; <b>Edad:</b> " + escapar(edad) : ""}${p.rutOrId ? " &nbsp;·&nbsp; <b>RFC:</b> " + escapar(p.rutOrId) : ""}</div>
-        <h2>${escapar(titulo)}</h2>
-        ${cuerpo}
+        ${bloques.map((b) => `<h2>${escapar(b.titulo)}</h2>${b.cuerpo}`).join("")}
         <div class="firma">
           ${firma ? '<img src="' + firma + '">' : '<div style="height:90px"></div>'}
-          <div class="linea">${escapar(nombre)}</div>
+          <div class="linea">${escapar(nombreBajoFirma)}</div>
         </div>
       </div>
     </body></html>`;
 
   const w = window.open("", "_blank", "width=850,height=1100");
-  if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
+  if (!w) { avisar("El navegador bloqueó la ventana. Permite ventanas emergentes e inténtalo de nuevo."); return; }
   w.document.open(); w.document.write(doc); w.document.close();
 }
 
@@ -2271,10 +2505,13 @@ function renderHistoria() {
       ${meds.length ? `<div style="margin-top:9px"><div style="font-size:13.5px; font-weight:700">Receta</div><ul style="font-size:13px; margin:2px 0 0 30px">` + meds.map((m) => "<li>" + escapar(m.name) + " " + escapar(m.dosage||"") + (m.frequency? " — cada " + escapar(m.frequency):"") + (m.duration? " por " + escapar(m.duration):"") + (m.notes? " (" + escapar(m.notes) + ")":"") + "</li>").join("") + "</ul></div>" : ""}
       ${fila("Pago", pagoLabel(c.paymentMethod) + (typeof c.amountPaid === "number" ? " · $" + c.amountPaid : ""))}
       ${(c.folioFiscal || "").trim() ? fila("Folio fiscal", c.folioFiscal) : ""}
+      ${fila("Requiere factura", c.requiresInvoice ? "Sí" : "No")}
+      ${c.requiresInvoice ? fila("RFC fiscal", c.confirmedRfc) + fila("Razón social", c.razonSocial) + fila("Dirección fiscal", c.confirmedTaxAddress) : ""}
       ${(() => { const m = (c.prescription && c.prescription.medications) || []; const est = String(c.studies||"").split("\n").filter(s=>s.trim()); const b = [];
         b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirNotaConsulta('${c.id}')">📄 Reporte Consulta – PDF</button>`);
         if (m.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','receta')">🖨️ Receta Medicamentos – PDF</button>`);
         if (est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','estudios')">🖨️ Solicitud de estudios – PDF</button>`);
+        if (m.length && est.length) b.push(`<button class="secundario" style="font-size:12px; padding:5px 10px" onclick="imprimirDocumento('${c.id}','ambos')">🖨️ Receta Medicamentos + Estudios</button>`);
         return `<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">${b.join("")}</div>`; })()}`;
     html += `<div style="border:1px solid var(--borde); border-radius:10px; margin-bottom:10px; overflow:hidden">
       <div onclick="toggleConsulta(${idx})" style="cursor:pointer; padding:10px 12px; background:var(--fondo); display:flex; align-items:center; gap:8px">
@@ -2320,9 +2557,24 @@ function fila(etq, val) {
 }
 
 // ---------- Nueva consulta ----------
+function alternarFacturaConsulta() {
+  const on = $("conFactura").checked;
+  $("conFacturaDatos").style.display = on ? "" : "none";
+  // Al activarla, se proponen los datos fiscales que ya tiene el paciente.
+  if (on && !$("conRfc").value) {
+    const p = pacientes.find((x) => x.id === historiaPacienteId);
+    if (p) {
+      const convenio = convenioBanco(p);
+      $("conRfc").value = convenio ? convenio.rfc : (p.rfc || p.rutOrId || "");
+      $("conDireccionFiscal").value = p.taxAddressIsSame === false ? (p.taxAddress || "") : (p.address || "");
+      if (convenio) $("conRazonSocial").value = convenio.razon;
+    }
+  }
+}
+
 function abrirModalConsulta(idEditar) {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
-  if (!p) { alert("Primero abre la historia de un paciente."); return; }
+  if (!p) { avisar("Primero abre la historia de un paciente."); return; }
   consultaEditandoId = idEditar || null;
   const editando = idEditar ? consultas.find((c) => c.id === idEditar) : null;
   $("tituloModalConsulta").textContent = editando ? "Editar consulta" : "Nueva consulta";
@@ -2332,6 +2584,14 @@ function abrirModalConsulta(idEditar) {
    "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
   $("conArchivos").value = "";
   relacionArchivos = {};
+  $("conFactura").checked = false; $("conRfc").value = ""; $("conRazonSocial").value = ""; $("conDireccionFiscal").value = "";
+  if (editando) {
+    $("conFactura").checked = !!editando.requiresInvoice;
+    $("conRfc").value = editando.confirmedRfc || "";
+    $("conRazonSocial").value = editando.razonSocial || "";
+    $("conDireccionFiscal").value = editando.confirmedTaxAddress || "";
+  }
+  alternarFacturaConsulta();
   if (editando) {
     // Pre-llenar con la consulta existente
     $("conFecha").value = String(editando.date || "").slice(0, 10);
@@ -2375,7 +2635,7 @@ function abrirModalConsulta(idEditar) {
   calcIMC();
   dibujarRelacionArchivos();
   actualizarHoraCitaLigada(p.id);
-  $("modalConsulta").classList.add("visible");
+  mostrarModal("modalConsulta");
 }
 
 // Muestra los archivos (ya guardados y recién elegidos) con un menú para
@@ -2562,7 +2822,8 @@ async function renderPDF(url, cont, token) {
 // Elimina el archivo que se está viendo (de la consulta y del almacenamiento)
 async function visorEliminar() {
   const nombre = visorArchivos[visorIndice];
-  if (!confirm('¿Eliminar el archivo "' + nombre + '"? Esta acción no se puede deshacer.')) return;
+  if (!(await confirmar('¿Eliminar el archivo "' + nombre + '"?\n\nEsta acción no se puede deshacer.',
+                        "Eliminar archivo", "Sí, eliminar", true))) return;
   try {
     const actuales = await leerJSON("consultas.json");
     const i = actuales.findIndex((c) => c.id === visorConsultaId);
@@ -2572,7 +2833,7 @@ async function visorEliminar() {
       consultas = actuales;
     }
   } catch (e) {
-    alert("No se pudo actualizar la consulta: " + (e.message || "")); return;
+    avisar("No se pudo actualizar la consulta: " + (e.message || "")); return;
   }
   try { await borrarUnEstudio(visorConsultaId, nombre); } catch {}
   visorArchivos = visorArchivos.filter((n) => n !== nombre);
@@ -2657,8 +2918,9 @@ document.addEventListener("keydown", (e) => {
 async function eliminarConsulta(id) {
   const c = consultas.find((x) => x.id === id);
   if (!c) return;
-  if (!confirm("¿Eliminar la consulta del " + fechaLarga(c.date) + "? "
-      + "También se eliminarán sus archivos de estudios adjuntos. Esta acción no se puede deshacer.")) return;
+  if (!(await confirmar("¿Eliminar la consulta del " + fechaLarga(c.date) + "?\n\n"
+      + "También se eliminarán sus archivos de estudios adjuntos. Esta acción no se puede deshacer.",
+      "Eliminar consulta", "Sí, eliminar", true))) return;
   const actuales = await leerJSON("consultas.json");
   // Solo UNA aparición: si por un error hubiera dos registros con el mismo id,
   // cada clic elimina una copia, no todas.
@@ -2687,6 +2949,53 @@ async function borrarEstudios(consultaId) {
   } catch {}
 }
 
+// ---------- Reglas fiscales (idénticas a las de la app de la doctora) ----------
+// SIN factura → Sin Régimen, PUBLICO EN GENERAL y RFC genérico XAXX010101000.
+// CON factura → el régimen se deduce del RFC y, si es del convenio Banco de
+// México, la razón social sale del perfil del paciente.
+const RFC_GENERICO = "XAXX010101000";
+const RAZON_PUBLICO = "PUBLICO EN GENERAL";
+const RFC_MORALES = ["BME821130SXA", "FCP041215RN6"];
+const RFC_FISICOS = ["FONL631226TN7"];
+function rfcNorm(s) {
+  return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+}
+// La homoclave son los últimos 3 caracteres SOLO en un RFC completo (13 física / 12 moral).
+function rfcSinHomoclave(s) {
+  const n = rfcNorm(s);
+  return (n.length === 13 || n.length === 12) ? n.slice(0, -3) : n;
+}
+function regimenSugerido(rfcFiscal, rfcPaciente) {
+  const rfc = rfcNorm(rfcFiscal);
+  if (!rfc) return "";
+  if (rfc === RFC_GENERICO) return "Público en General";
+  if (RFC_MORALES.includes(rfc)) return "Persona Moral";
+  if (RFC_FISICOS.includes(rfc)) return "Persona Física";
+  const pac = rfcNorm(rfcPaciente);
+  if (pac && rfcSinHomoclave(rfc) === rfcSinHomoclave(pac)) return "Persona Física";
+  return "";
+}
+// Completa los campos fiscales de la consulta. Nunca pisa lo que ya estaba
+// capturado en la consulta que se está editando (`previa`).
+function aplicarReglasFiscales(campos, paciente, previa) {
+  if (!campos.requiresInvoice) {
+    campos.regimenFiscal = "Sin Régimen";
+    campos.razonSocial = RAZON_PUBLICO;
+    campos.confirmedRfc = RFC_GENERICO;
+    return campos;
+  }
+  const regimenPrevio = (previa && previa.regimenFiscal ? String(previa.regimenFiscal) : "").trim();
+  campos.regimenFiscal = regimenPrevio || regimenSugerido(campos.confirmedRfc, paciente ? paciente.rutOrId : "");
+  if (!String(campos.razonSocial || "").trim()) {
+    const convenio = convenioBanco(paciente);
+    const perfilRFC = perfilDeRFC(campos.confirmedRfc);
+    if (convenio) campos.razonSocial = convenio.razon;
+    else if (perfilRFC) campos.razonSocial = BANCO_PERFILES[perfilRFC].razon;
+    else if (previa && previa.razonSocial) campos.razonSocial = previa.razonSocial;
+  }
+  return campos;
+}
+
 let guardandoConsulta = false;
 async function guardarConsulta() {
   // Candado: guardar en la nube tarda unos segundos; un doble clic
@@ -2700,7 +3009,7 @@ async function guardarConsulta() {
   const p = pacientes.find((x) => x.id === historiaPacienteId);
   if (!p) return;
   if (!$("conMotivo").value.trim() && !$("conDiagnostico").value.trim()) {
-    alert("Captura al menos el motivo o el diagnóstico."); return;
+    avisar("Captura al menos el motivo o el diagnóstico."); return;
   }
   const meds = medsConsulta.filter((m) => m.name.trim());
   const vitals = { ta:$("svTA").value.trim(), fc:$("svFC").value.trim(), fr:$("svFR").value.trim(),
@@ -2729,7 +3038,7 @@ async function guardarConsulta() {
       if (nombre !== base && relacionArchivos[base]) { relacionArchivos[nombre] = relacionArchivos[base]; delete relacionArchivos[base]; }
     }
   } catch (e) {
-    alert("No se pudo subir un archivo de estudios (" + e.message + "). "
+    avisar("No se pudo subir un archivo de estudios (" + e.message + "). "
       + "No se guardó la consulta; revisa la conexión e inténtalo de nuevo.");
     return;
   }
@@ -2745,7 +3054,15 @@ async function guardarConsulta() {
     vitals: vacio ? null : vitals, physicalExam: $("conExploracion").value.trim(),
     treatmentPlan: $("conPlan").value.trim(),
     estudiosPrevios: $("conEstudiosPrevios").value.trim(),
+    requiresInvoice: $("conFactura").checked,
+    confirmedRfc: $("conFactura").checked ? $("conRfc").value.trim().toUpperCase() : "",
+    razonSocial: $("conFactura").checked ? $("conRazonSocial").value.trim().toUpperCase() : "",
+    confirmedTaxAddress: $("conFactura").checked ? $("conDireccionFiscal").value.trim().toUpperCase() : "",
   };
+  // Reglas fiscales (mismas que la app): público en general si no pide factura,
+  // y RFC/razón social del convenio Banco de México cuando aplica.
+  aplicarReglasFiscales(campos, p, editandoId ? consultas.find((c) => c.id === editandoId) : null);
+
   // Relación archivo → estudio, solo para los archivos que quedan en la consulta.
   const etiquetasDe = (listaArchivos) => {
     const out = {};
@@ -2756,7 +3073,7 @@ async function guardarConsulta() {
   const actuales = await leerJSON("consultas.json");
   if (editandoId) {
     const i = actuales.findIndex((c) => c.id === editandoId);
-    if (i < 0) { alert("Esta consulta ya no existe en la base."); return; }
+    if (i < 0) { avisar("Esta consulta ya no existe en la base."); return; }
     // Se conservan los campos que la consola no edita (facturación, etc.)
     // y los archivos previos; los recién subidos se suman.
     const archivosFinales = [...(actuales[i].studyFiles || []), ...nombresSubidos];
@@ -2765,7 +3082,6 @@ async function guardarConsulta() {
   } else {
     actuales.push({
       id: idConsulta, patientId: p.id,
-      requiresInvoice: false, confirmedRfc: "", confirmedTaxAddress: "",
       studyFiles: nombresSubidos, studyFileLabels: etiquetasDe(nombresSubidos),
       ...campos,
     });
@@ -2794,8 +3110,9 @@ $("tabPacientes").onclick = () => {
   $("vistaPacientes").style.display = "block"; $("vistaAgenda").style.display = "none";
 };
 $("btnActualizar").onclick = recargar;
-$("btnSalir").onclick = () => {
-  if (confirm("¿Cerrar la sesión con Microsoft en este dispositivo?")) cerrarSesion();
+$("btnSalir").onclick = async () => {
+  if (await confirmar("¿Cerrar la sesión con Microsoft en este dispositivo?",
+                      "Cerrar sesión", "Sí, cerrar sesión")) cerrarSesion();
 };
 $("btnConfig").onclick = () => { limpiarError(); mostrarConfig(); };
 $("btnIrConfig").onclick = () => { limpiarError(); mostrarConfig(); };
@@ -2813,8 +3130,16 @@ $("btnGuardarConfig").onclick = () => {
   iniciarSesion();
 };
 document.querySelectorAll(".modal-fondo").forEach((m) => {
-  m.addEventListener("mousedown", (e) => { if (e.target === m) cerrarModales(); });
+  m.addEventListener("mousedown", (e) => { if (e.target === m) cerrarModalConAviso(m.id); });
 });
+// Escape cierra el formulario que esté encima (avisando si hay cambios sin guardar).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if ($("visorEstudios") && $("visorEstudios").classList.contains("visible")) return;
+  const m = modalEncima();
+  if (m) { e.preventDefault(); cerrarModalConAviso(m.id); }
+});
+
 
 // Arranque
 (async () => {
