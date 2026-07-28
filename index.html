@@ -2592,8 +2592,9 @@ async function imprimirDocumento(consultaId, tipo) {
   const firmaOriginal = conFirma ? (mem.firmaDataURL || "") : "";
   if (conFirma && !firmaOriginal) avisar("No hay una firma digital guardada. Se generará sin firma; súbela en la app de la doctora (Excel y Datos → Membrete) si la necesitas.");
   const firma = await firmaRecortada(firmaOriginal);
-  // Nombre bajo la firma: si el membrete lo trae, se usa ese; si no, el del médico.
-  const nombreBajoFirma = String(mem.nombreFirma || "").trim() || nombre;
+  // Nombre bajo la firma: solo si está capturado en el membrete (campo opcional).
+  // Si está vacío no se imprime nada, igual que en la app.
+  const nombreBajoFirma = String(mem.nombreFirma || "").trim();
   const fecha = fechaLarga(c.date);
   const edad = edadDe(p.birthDate);
 
@@ -2681,7 +2682,9 @@ async function imprimirDocumento(consultaId, tipo) {
       ${combinado
         ? `.contenido { display: flex; flex-direction: column; min-height: 340pt; }
            .firma { margin-top: auto; padding-top: 24pt; padding-bottom: 24pt; }`
-        : `.firma { position: absolute; left: 26pt; right: 26pt; bottom: 24pt; }`}
+        : `/* La hoja es media carta de verdad, así que el borde de abajo es el borde
+              del papel: la firma se sube para que ninguna impresora se la coma. */
+           .firma { position: absolute; left: 26pt; right: 26pt; bottom: 48pt; }`}
       @media screen { body { background: #f1f5f9; padding: 10px 0; }
                       .hoja { background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.25); } }
       @media print { .noimprimir { display: none; } body { background: #fff; padding: 0; }
@@ -2713,7 +2716,7 @@ async function imprimirDocumento(consultaId, tipo) {
           ${bloques.map((b) => `<div class="d-titulo">${escapar(b.titulo)}</div><div class="d-lista">${b.cuerpo}</div>`).join("")}
           <div class="firma">
             ${firmaImg}
-            <div class="pie">${escapar(nombreBajoFirma)}</div>
+            ${nombreBajoFirma ? `<div class="pie">${escapar(nombreBajoFirma)}</div>` : ""}
           </div>
         </div>
       </div>
