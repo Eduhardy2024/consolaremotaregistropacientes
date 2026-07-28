@@ -369,6 +369,9 @@
     </div>
     <div class="campo"><label>Domicilio</label><input id="pacDomicilio"></div>
     <div class="campo"><label>Alergias</label><input id="pacAlergias"></div>
+    <div class="campo"><label>Antecedentes personales</label><textarea id="pacAntPersonales" rows="2" placeholder="Enfermedades, cirugías, hospitalizaciones…"></textarea></div>
+    <div class="campo"><label>Antecedentes familiares</label><textarea id="pacAntFamiliares" rows="2" placeholder="Padecimientos de padres, hermanos…"></textarea></div>
+    <div class="campo"><label>Medicamentos de uso continuo</label><textarea id="pacMedContinua" rows="2" placeholder="Un medicamento por línea"></textarea></div>
 
     <div class="campo" style="margin-top:4px">
       <label style="text-transform:none; font-size:14px; color:#0f172a; display:flex; align-items:center; gap:8px; cursor:pointer">
@@ -425,8 +428,6 @@
       </div>
     </div>
 
-    <p style="font-size:12px; color:var(--gris)">Los antecedentes médicos (alergias, antecedentes personales/familiares)
-       se capturan en la app de la doctora. Para ver la historia clínica o registrar una consulta, usa el botón "🩺 Historia".</p>
     <div class="acciones-modal">
       <button class="secundario" onclick="cerrarModalConAviso('modalPaciente')">Cancelar</button>
       <button class="primario" id="btnGuardarPaciente" onclick="guardarPaciente()">Guardar paciente</button>
@@ -1365,6 +1366,11 @@ async function guardarCita() {
   }
   await escribirJSON("citas.json", actuales);
   citas = actuales;
+  const guardada = citaEditandoId
+    ? actuales.find((c) => c.id === citaEditandoId)
+    : actuales[actuales.length - 1];
+  registrarBitacora(citaEditandoId ? "edición" : "alta", "cita", guardada && guardada.id,
+                    paciente.name + " · " + $("citaFecha").value + " " + $("citaHora").value);
   borrarBorrador("modalCita");
   cerrarModales();
   dibujarTodo();
@@ -1378,7 +1384,14 @@ async function guardarCita() {
 async function cambiarEstado(id, estado) {
   const actuales = await leerJSON("citas.json");
   const i = actuales.findIndex((c) => c.id === id);
-  if (i >= 0) { actuales[i].status = estado; await escribirJSON("citas.json", actuales); citas = actuales; }
+  if (i >= 0) {
+    actuales[i].status = estado;
+    await escribirJSON("citas.json", actuales);
+    citas = actuales;
+    registrarBitacora("edición", "cita", id,
+                      nombreDePacienteBitacora(actuales[i].patientId) + " · " + actuales[i].date
+                      + " " + actuales[i].time + " → " + estado);
+  }
   dibujarTodo();
 }
 
@@ -1389,6 +1402,7 @@ async function eliminarCita(id) {
   const actuales = (await leerJSON("citas.json")).filter((x) => x.id !== id);
   await escribirJSON("citas.json", actuales);
   citas = actuales;
+  registrarBitacora("baja", "cita", id, nombreDePacienteBitacora(c.patientId) + " · " + c.date + " " + c.time);
   dibujarTodo();
 }
 
@@ -1482,6 +1496,9 @@ function abrirModalPaciente(id) {
   $("pacCorreo").value = p.email || "";
   $("pacDomicilio").value = p.address || "";
   $("pacAlergias").value = p.allergies || "";
+  $("pacAntPersonales").value = p.personalHistory || "";
+  $("pacAntFamiliares").value = p.familyHistory || "";
+  $("pacMedContinua").value = p.continuousMedication || "";
   $("pacBanco").checked = !!p.bancoMexico;
   $("pacBancoNum").value = p.bancoMexicoNumero || "";
   $("pacBancoPerfil").value = p.bancoMexicoPerfil || perfilDeRFC(p.rfc) || "";
@@ -1985,6 +2002,7 @@ async function eliminarPacienteDesdeHistoria() {
     avisar("No se pudo eliminar: " + (e && e.message ? e.message : e));
     return;
   }
+  registrarBitacora("baja", "paciente", p.id, p.name + " (con su historial)");
   historiaPacienteId = null;
   cerrarModales();
   dibujarTodo();
@@ -2028,6 +2046,9 @@ async function guardarPaciente() {
     email: $("pacCorreo").value.trim(),
     address: $("pacDomicilio").value.trim().toUpperCase(),
     allergies: $("pacAlergias").value.trim().toUpperCase(),
+    personalHistory: $("pacAntPersonales").value.trim(),
+    familyHistory: $("pacAntFamiliares").value.trim(),
+    continuousMedication: $("pacMedContinua").value.trim(),
     bancoMexico: $("pacBanco").checked,
     bancoMexicoNumero: $("pacBanco").checked ? $("pacBancoNum").value.trim() : "",
     bancoMexicoPerfil: $("pacBanco").checked ? $("pacBancoPerfil").value : "",
@@ -2046,7 +2067,6 @@ async function guardarPaciente() {
   } else {
     actuales.push({
       id: uuid(),
-      familyHistory: "", personalHistory: "", continuousMedication: "",
       createdAt: new Date().toISOString(),
       ...campos,
     });
@@ -2061,6 +2081,8 @@ async function guardarPaciente() {
     return;
   }
   pacientes = actuales;
+  registrarBitacora(pacienteEditandoId ? "edición" : "alta", "paciente",
+                    pacienteEditandoId || (actuales[actuales.length - 1] || {}).id, campos.name);
   borrarBorrador("modalPaciente");
   $("modalPaciente").classList.remove("visible");
   // Si se editó desde la historia, ésta sigue abierta: refrescar su encabezado.
@@ -2160,6 +2182,45 @@ function avisar(mensaje, titulo) {
 }
 
 
+
+// ---------- Bitácora de trazabilidad ----------
+// Cada alta, edición o baja hecha desde la consola queda registrada en
+// Datos/bitacora.jsonl, igual que las que se hacen en la app de la doctora
+// (lo exige el expediente clínico). Nunca interrumpe el guardado: si falla,
+// solo se anota en la consola del navegador.
+function nombreDePacienteBitacora(id) {
+  const p = pacientes.find((x) => x.id === id);
+  return p ? p.name : "(paciente " + id + ")";
+}
+
+async function registrarBitacora(accion, tipo, id, detalle) {
+  const entrada = {
+    fecha: new Date().toISOString(),
+    usuario: usuarioBitacora(),
+    accion: accion, tipo: tipo, id: String(id || ""), detalle: String(detalle || ""),
+  };
+  try { await anexarBitacora(entrada); } catch (e) { console.warn("bitácora:", e); }
+}
+
+function usuarioBitacora() {
+  const cuenta = cfgLeer("cuenta") || duenoOneDrive || "";
+  return "Consola Nube" + (cuenta ? " (" + cuenta + ")" : "");
+}
+
+async function anexarBitacora(entrada) {
+  // OneDrive no sabe "añadir al final": se lee el archivo y se vuelve a subir.
+  let texto = "";
+  const r = await graphFetch("bitacora.jsonl").catch(() => null);
+  if (r && r.ok) texto = await r.text();
+  else if (r && r.status !== 404) throw new Error("no se pudo leer la bitácora (" + r.status + ")");
+  const w = await graphFetch("bitacora.jsonl", {
+    method: "PUT",
+    headers: { "Content-Type": "text/plain" },
+    body: texto + JSON.stringify(entrada) + "\n",
+  });
+  if (!w || !w.ok) throw new Error("no se pudo escribir la bitácora");
+}
+
 // ---------- Borradores automáticos (para no perder la captura) ----------
 // Cada vez que se escribe en un formulario se guarda una copia en el propio
 // dispositivo (localStorage). Si se cae la red, se recarga la página o se cierra
@@ -2184,6 +2245,10 @@ function camposDelModal(id) {
 
 function guardarBorrador(id) {
   if (!["modalConsulta", "modalPaciente", "modalCita"].includes(id)) return;
+  // Si el formulario ya se cerró (p. ej. porque se acaba de guardar), un
+  // autoguardado rezagado no debe revivir el borrador.
+  const modal = document.getElementById(id);
+  if (!modal || !modal.classList.contains("visible")) return;
   const datos = { contexto: contextoModal(id), cuando: new Date().toISOString(), campos: {} };
   for (const e of camposDelModal(id)) {
     datos.campos[e.id] = e.type === "checkbox" ? e.checked : e.value;
@@ -2194,6 +2259,7 @@ function guardarBorrador(id) {
 }
 
 function borrarBorrador(id) {
+  clearTimeout(_temporizadorBorrador);     // cancela un autoguardado en vuelo
   try { localStorage.removeItem(BORRADOR + id); } catch {}
 }
 
@@ -2678,7 +2744,17 @@ function abrirModalConsulta(idEditar) {
   const editando = idEditar ? consultas.find((c) => c.id === idEditar) : null;
   $("tituloModalConsulta").textContent = editando ? "Editar consulta" : "Nueva consulta";
   const previas = consultas.filter((c) => c.patientId === p.id);
-  $("consultaPaciente").textContent = "Paciente: " + p.name;
+  // Aviso de datos del paciente que hacen falta para facturar o para el expediente.
+  const faltan = [];
+  if (!String(p.birthDate || "").trim()) faltan.push("fecha de nacimiento");
+  if (!String(p.rutOrId || "").trim()) faltan.push("RFC");
+  if (!String(p.curp || "").trim()) faltan.push("CURP");
+  $("consultaPaciente").innerHTML = "Paciente: " + escapar(p.name)
+    + (faltan.length
+        ? `<div style="margin-top:4px; color:#b45309; background:#fffbeb; border-radius:6px; padding:5px 8px">
+             ⚠️ Falta capturar en el paciente: ${escapar(faltan.join(" y "))}. Edítalo desde su ficha.
+           </div>`
+        : "");
   ["conMotivo","conSintomas","conExploracion","conEstudiosPrevios","conDiagnostico","conPlan","conEstudios","conInterpretacion","conNotas","conMonto",
    "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
   $("conArchivos").value = "";
@@ -2798,16 +2874,32 @@ function autoSlashTA(campo) {
   campo.dataset.taAnterior = campo.value;
 }
 
+// Talla capturada en alguna consulta previa del paciente (la estatura casi no
+// cambia): permite calcular el IMC aunque hoy solo se haya pesado.
+function tallaConocida(pacienteId) {
+  const previas = consultas
+    .filter((c) => c.patientId === pacienteId && c.vitals && numDe(c.vitals.talla))
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return previas.length ? previas[0].vitals.talla : null;
+}
+
 function calcIMC() {
-  const p = numDe($("svPeso").value); let t = numDe($("svTalla").value);
+  const p = numDe($("svPeso").value);
+  let t = numDe($("svTalla").value);
   const el = $("imcCalc");
+  let heredada = false;
+  if (p && !t) {
+    const previa = tallaConocida(historiaPacienteId);
+    if (previa) { t = numDe(previa); heredada = true; }
+  }
   if (!p || !t) { el.style.display = "none"; return; }
   if (t > 3) t = t / 100;
   const imc = p / (t * t);
   if (!isFinite(imc) || imc < 5 || imc > 200) { el.style.display = "none"; return; }
   let cls = imc < 18.5 ? "Bajo peso" : imc < 25 ? "Peso normal" : imc < 30 ? "Sobrepeso" : "Obesidad";
   el.style.display = "block";
-  el.textContent = "IMC: " + (Math.round(imc * 10) / 10) + " kg/m² · " + cls;
+  el.textContent = "IMC: " + (Math.round(imc * 10) / 10) + " kg/m² · " + cls
+    + (heredada ? " (con la talla de una consulta anterior)" : "");
 }
 function nombreArchivoSeguro(nombre) {
   return String(nombre || "archivo").replace(/[\/\\:*?"<>|#%&{}$!'@+`=]/g, "_").slice(-120);
@@ -3044,6 +3136,7 @@ async function eliminarConsulta(id) {
   if (i >= 0) actuales.splice(i, 1);
   await escribirJSON("consultas.json", actuales);
   consultas = actuales;
+  registrarBitacora("baja", "consulta", id, nombreDePacienteBitacora(c.patientId) + " · " + c.date);
   borrarEstudios(id);   // mejor esfuerzo; si falla, solo quedan archivos huérfanos
   renderHistoria();
 }
@@ -3212,6 +3305,8 @@ async function guardarConsulta() {
     return;
   }
   consultas = actuales;
+  registrarBitacora(editandoId ? "edición" : "alta", "consulta", idConsulta,
+                    p.name + " · " + campos.date);
   borrarBorrador("modalConsulta");
   await sincronizarCitaDeConsulta(p, campos.date, editandoId);
   consultaEditandoId = null;
