@@ -2531,6 +2531,47 @@ async function imprimirHistorialClinico(pacienteId) {
   abrirImpresion("Historial clínico – " + (p.name||""), inner);
 }
 
+
+// La firma se guarda como PNG con mucho espacio transparente alrededor. Aquí se
+// recorta (igual que en la app) para que el trazo quede pegado al nombre, y se
+// calcula su tamaño en puntos con la misma escala que usa el PDF de la Mac.
+function firmaRecortada(dataURL) {
+  return new Promise((resolve) => {
+    if (!dataURL) { resolve(null); return; }
+    const img = new Image();
+    img.onerror = () => resolve(null);
+    img.onload = () => {
+      try {
+        const lienzo = document.createElement("canvas");
+        lienzo.width = img.naturalWidth; lienzo.height = img.naturalHeight;
+        const g = lienzo.getContext("2d");
+        g.drawImage(img, 0, 0);
+        const escala = Math.min(300 / lienzo.width, 110 / lienzo.height, 1);
+        const px = g.getImageData(0, 0, lienzo.width, lienzo.height).data;
+        let minX = lienzo.width, maxX = -1, minY = lienzo.height, maxY = -1;
+        for (let y = 0; y < lienzo.height; y++) {
+          for (let x = 0; x < lienzo.width; x++) {
+            if (px[(y * lienzo.width + x) * 4 + 3] > 8) {
+              if (x < minX) minX = x; if (x > maxX) maxX = x;
+              if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+          }
+        }
+        if (maxX < minX) {   // imagen sin nada opaco: se usa completa
+          resolve({ src: dataURL, ancho: lienzo.width * escala, alto: lienzo.height * escala });
+          return;
+        }
+        const ancho = maxX - minX + 1, alto = maxY - minY + 1;
+        const recorte = document.createElement("canvas");
+        recorte.width = ancho; recorte.height = alto;
+        recorte.getContext("2d").drawImage(lienzo, minX, minY, ancho, alto, 0, 0, ancho, alto);
+        resolve({ src: recorte.toDataURL("image/png"), ancho: ancho * escala, alto: alto * escala });
+      } catch { resolve(null); }
+    };
+    img.src = dataURL;
+  });
+}
+
 async function imprimirDocumento(consultaId, tipo) {
   const c = consultas.find((x) => x.id === consultaId);
   if (!c) return;
@@ -2548,79 +2589,132 @@ async function imprimirDocumento(consultaId, tipo) {
   const universidad = mem.universidad || "";
   const bIzq = mem.bloqueIzquierdo || "";
   const bDer = mem.bloqueDerecho || "";
-  let firma = conFirma ? (mem.firmaDataURL || "") : "";
-  if (conFirma && !firma) avisar("No hay una firma digital guardada. Se generará sin firma; súbela en la app de la doctora (Excel y Datos → Membrete) si la necesitas.");
+  const firmaOriginal = conFirma ? (mem.firmaDataURL || "") : "";
+  if (conFirma && !firmaOriginal) avisar("No hay una firma digital guardada. Se generará sin firma; súbela en la app de la doctora (Excel y Datos → Membrete) si la necesitas.");
+  const firma = await firmaRecortada(firmaOriginal);
   // Nombre bajo la firma: si el membrete lo trae, se usa ese; si no, el del médico.
   const nombreBajoFirma = String(mem.nombreFirma || "").trim() || nombre;
   const fecha = fechaLarga(c.date);
   const edad = edadDe(p.birthDate);
 
+  // Mismo armado de líneas que la app: "1. Nombre dosis — cada X por Y. Obs"
   const cuerpoReceta = () => {
     const meds = (c.prescription && c.prescription.medications) || [];
-    return "<ol>" + meds.map((m) => "<li><b>" + escapar(m.name) + "</b> " + escapar(m.dosage||"")
-      + (m.frequency ? " — cada " + escapar(m.frequency) : "")
-      + (m.duration ? " por " + escapar(m.duration) : "")
-      + (m.notes ? "<br><span style='color:#444'>" + escapar(m.notes) + "</span>" : "") + "</li>").join("") + "</ol>";
+    let html = meds.map((m, i) => {
+      let indicacion = "";
+      if (m.frequency) indicacion += "cada " + m.frequency;
+      if (m.duration) indicacion += (indicacion ? " por " : "por ") + m.duration;
+      if (m.notes) indicacion += indicacion ? ". " + m.notes : m.notes;
+      return "<div>" + (i + 1) + ". <b>" + escapar(m.name) + "</b>"
+        + (m.dosage ? " " + escapar(m.dosage) : "")
+        + (indicacion ? " — " + escapar(indicacion) : "") + "</div>";
+    }).join("");
+    const plan = String(c.treatmentPlan || "").trim();
+    if (plan) html += "<div>" + escapar(plan) + "</div>";
+    return html;
   };
   const cuerpoEstudios = () => {
     const est = String(c.studies || "").split("\n").map((s) => s.trim()).filter(Boolean);
-    return "<ol>" + est.map((e) => "<li>" + escapar(e) + "</li>").join("") + "</ol>";
+    return est.map((e, i) => "<div>" + (i + 1) + ". " + escapar(e) + "</div>").join("");
   };
   // Una hoja carta puede llevar los dos documentos: receta arriba y estudios abajo.
+  const TITULO_RECETA = "Tratamiento:";
+  const TITULO_ESTUDIOS = "Solicito los siguientes estudios de laboratorio y/o gabinete:";
   const bloques = combinado
-    ? [{ titulo: "Receta médica", cuerpo: cuerpoReceta() },
-       { titulo: "Solicitud de estudios de laboratorio y gabinete", cuerpo: cuerpoEstudios() }]
+    ? [{ titulo: TITULO_RECETA, cuerpo: cuerpoReceta() },
+       { titulo: TITULO_ESTUDIOS, cuerpo: cuerpoEstudios() }]
     : (tipo === "receta"
-        ? [{ titulo: "Receta médica", cuerpo: cuerpoReceta() }]
-        : [{ titulo: "Solicitud de estudios de laboratorio y gabinete", cuerpo: cuerpoEstudios() }]);
+        ? [{ titulo: TITULO_RECETA, cuerpo: cuerpoReceta() }]
+        : [{ titulo: TITULO_ESTUDIOS, cuerpo: cuerpoEstudios() }]);
   const titulo = combinado ? "Receta Medicamentos y Estudios Laboratorio" : bloques[0].titulo;
+
+  // ---- Documento con el MISMO formato que la app (medidas en puntos, como el PDF) ----
+  // Suelto: media carta horizontal (612 × 396 pt). Combinado: hoja carta (612 × 792).
+  const filas = combinado ? 0
+    : (tipo === "receta" ? ((c.prescription && c.prescription.medications) || []).length
+                         : String(c.studies || "").split("\n").filter((s) => s.trim()).length);
+  const cuerpo = filas > 7 ? 9.5 : 11;          // igual que la app
+  const fechaCorta = (() => {
+    const d = String(c.date || "").slice(0, 10).split("-");
+    return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : String(c.date || "");
+  })();
+  const nacimiento = (() => {
+    const d = String(p.birthDate || "").slice(0, 10).split("-");
+    return d.length === 3 && d[0] ? `${d[2]}/${d[1]}/${d[0]}` : "";
+  })();
+  const dxPrimeraLinea = String(c.diagnosis || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || "";
+  const etiquetaDx = (!combinado && tipo === "estudios") ? "Dx / justificación clínica:" : "Diagnóstico:";
+  const firmaImg = firma
+    ? `<img src="${firma.src}" style="width:${firma.ancho}pt; height:${firma.alto}pt">`
+    : `<div style="height:34pt"></div>`;
 
   const doc = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${escapar(titulo)}</title>
     <style>
-      @page { size: letter; margin: ${combinado ? "1.4cm" : "1.6cm"}; }
+      /* Al guardar como PDF: media carta para un documento suelto, carta para los dos juntos. */
+      @page { size: ${combinado ? "letter" : "8.5in 5.5in"}; margin: 0; }
       * { box-sizing: border-box; }
-      body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
-      .nombre { font-size: 20px; font-weight: 800; }
-      .esp { font-size: 12px; color: #333; font-weight: 500; margin-left: 6px; }
-      .cols { display: flex; justify-content: space-between; gap: 20px; font-size: 10.5px; color: #333; margin-top: 4px; }
-      .cols div { white-space: pre-line; }
-      hr { border: none; border-top: 1px solid #333; margin: 10px 0 12px; }
-      .datos { font-size: 13px; margin-bottom: 8px; }
-      .datos b { font-weight: 700; }
-      h2 { font-size: 15px; margin: 16px 0 6px; }
-      ol { font-size: 13.5px; line-height: 1.5; padding-left: 22px; }
-      li { margin-bottom: 6px; }
-      .firma { margin-top: 70px; text-align: center; }
-      .firma img { height: 120px; object-fit: contain; display: block; margin: 0 auto -34px; }
-      .firma .linea { border-top: 1px solid #333; width: 260px; margin: 4px auto 0; padding-top: 3px; font-size: 12px; }
-      /* Los dos documentos en una hoja carta: un solo membrete y la firma después
-         de lo escrito. El mínimo de media carta conserva el espacio para firmar
-         cuando la receta es corta; si hay más contenido, la firma baja con él. */
-      .hoja { display: flex; flex-direction: column; min-height: 12.5cm; }
-      .hoja .firma { margin-top: auto; padding-top: 1.4cm; }
-      @media print { .noimprimir { display: none; } }
+      html, body { margin: 0; padding: 0; }
+      body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #000; background: #fff; }
+      .hoja { width: 612pt; ${combinado ? "min-height: 792pt;" : "height: 396pt;"}
+              padding: 22pt 26pt 0; margin: 0 auto; position: relative; overflow: hidden; }
+      .m-nombre { text-align: center; font-size: 16pt; font-weight: 700; color: #292c0d; line-height: 1.1; }
+      .m-esp { text-align: center; font-family: "Times New Roman", Times, serif; font-weight: 700;
+               font-size: 13pt; color: #292c0d; line-height: 1.1; }
+      .m-esp-img { display: block; margin: 1pt auto 2pt; height: 14pt; object-fit: contain; }
+      .m-uni { text-align: center; font-family: "Times New Roman", Times, serif; font-size: 11pt; line-height: 1.2; }
+      .m-linea { position: relative; }
+      .m-unidad { text-align: center; font-size: 8pt; line-height: 1.2; }
+      .m-fecha { position: absolute; right: 0; bottom: 0; font-size: 9pt; }
+      .m-barra { height: 3pt; background: #292c0d; margin-top: 3pt; }
+      .m-bloques { display: flex; justify-content: space-between; gap: 14pt; margin-top: 7pt;
+                   font-size: 6pt; line-height: 1.3; }
+      .m-bloques div { white-space: pre-line; }
+      .m-bloques .der { text-align: right; }
+      .d-paciente { font-size: ${cuerpo}pt; margin-top: 11pt; }
+      .d-campo { font-size: ${cuerpo}pt; margin-top: 4pt; }
+      .d-titulo { font-size: ${cuerpo}pt; font-weight: 700; margin-top: 7pt; }
+      .d-lista { font-size: ${cuerpo}pt; margin-left: 12pt; }
+      .d-lista div { margin-top: 3pt; }
+      .firma { text-align: center; }
+      .firma img { display: block; margin: 0 auto; object-fit: contain; }
+      .firma .pie { font-size: 10pt; margin-top: 1pt; }
+      ${combinado
+        ? `.contenido { display: flex; flex-direction: column; min-height: 340pt; }
+           .firma { margin-top: auto; padding-top: 24pt; padding-bottom: 24pt; }`
+        : `.firma { position: absolute; left: 26pt; right: 26pt; bottom: 24pt; }`}
+      @media screen { body { background: #f1f5f9; padding: 10px 0; }
+                      .hoja { background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.25); } }
+      @media print { .noimprimir { display: none; } body { background: #fff; padding: 0; }
+                     .hoja { box-shadow: none; } }
     </style></head>
     <body onload="window.focus()">
-      <div class="noimprimir" style="position:sticky; top:0; background:#eef; padding:10px 14px; font-size:13px; text-align:center; border-bottom:1px solid #ccd">
+      <div class="noimprimir" style="position:sticky; top:0; background:#eef; padding:10px 14px; font-size:13px; text-align:center; border-bottom:1px solid #ccd; z-index:5">
         <b>Vista previa</b> — revisa el documento y luego elige qué hacer.
         <div style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
           <button onclick="window.print()" style="padding:6px 14px; font-size:13px; font-weight:600">🖨️ Guardar PDF o imprimir</button>
           <button onclick="window.close()" style="padding:6px 14px; font-size:13px">Cerrar sin guardar</button>
         </div>
       </div>
-      <div class="${combinado ? "hoja" : ""}" style="padding: 4px 2px">
-        <div class="nombre">${escapar(nombre)}${mem.especialidadDataURL ? "" : `<span class="esp">${escapar(especialidad)}</span>`}</div>
-        ${mem.especialidadDataURL ? `<div style="margin:1px 0 2px"><img src="${mem.especialidadDataURL}" style="height:18px; object-fit:contain"></div>` : ""}
-        ${universidad ? `<div style="font-size:10.5px; color:#333">Institución que expide el título: ${escapar(universidad)}</div>` : ""}
-        ${(mem.unidad||"") ? `<div style="font-size:10.5px; color:#333">${escapar(String(mem.unidad).toUpperCase())}</div>` : ""}
-        <div class="cols"><div>${escapar(bIzq)}</div><div>${escapar(bDer)}</div></div>
-        <hr>
-        <div class="datos"><b>Fecha:</b> ${escapar(fecha)}</div>
-        <div class="datos"><b>Paciente:</b> ${escapar(p.name || "")}${edad ? " &nbsp;·&nbsp; <b>Edad:</b> " + escapar(edad) : ""}${p.rutOrId ? " &nbsp;·&nbsp; <b>RFC:</b> " + escapar(p.rutOrId) : ""}</div>
-        ${bloques.map((b) => `<h2>${escapar(b.titulo)}</h2>${b.cuerpo}`).join("")}
-        <div class="firma">
-          ${firma ? '<img src="' + firma + '">' : '<div style="height:90px"></div>'}
-          <div class="linea">${escapar(nombreBajoFirma)}</div>
+      <div class="hoja">
+        <div class="m-nombre">${escapar(nombre)}</div>
+        ${mem.especialidadDataURL
+          ? `<img class="m-esp-img" src="${mem.especialidadDataURL}">`
+          : (especialidad ? `<div class="m-esp">${escapar(especialidad)}</div>` : "")}
+        ${universidad ? `<div class="m-uni">${escapar(universidad)}</div>` : ""}
+        <div class="m-linea">
+          ${(mem.unidad || "") ? `<div class="m-unidad">${escapar(String(mem.unidad).toUpperCase())}</div>` : ""}
+          <div class="m-fecha">Fecha: ${escapar(fechaCorta)}</div>
+        </div>
+        <div class="m-barra"></div>
+        <div class="m-bloques"><div>${escapar(bIzq)}</div><div class="der">${escapar(bDer)}</div></div>
+        <div class="${combinado ? "contenido" : ""}">
+          <div class="d-paciente">Paciente: ${escapar(p.name || "")}${edad ? "&nbsp; &nbsp; &nbsp;Edad: " + escapar(edad) : ""}${nacimiento ? "&nbsp; &nbsp; &nbsp;Fecha de nacimiento: " + escapar(nacimiento) : ""}</div>
+          ${dxPrimeraLinea ? `<div class="d-campo"><b>${escapar(etiquetaDx)}</b> ${escapar(dxPrimeraLinea)}</div>` : ""}
+          ${bloques.map((b) => `<div class="d-titulo">${escapar(b.titulo)}</div><div class="d-lista">${b.cuerpo}</div>`).join("")}
+          <div class="firma">
+            ${firmaImg}
+            <div class="pie">${escapar(nombreBajoFirma)}</div>
+          </div>
         </div>
       </div>
     </body></html>`;
