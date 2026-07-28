@@ -529,7 +529,7 @@
 
     <label style="text-transform:uppercase; font-size:11px; font-weight:600; color:var(--gris)">Signos vitales</label>
     <div class="sv-grid">
-      <div class="campo" style="margin:0"><label>TA (mmHg)</label><input id="svTA" oninput="calcIMC()"></div>
+      <div class="campo" style="margin:0"><label>TA (mmHg)</label><input id="svTA" inputmode="numeric" placeholder="120/80" oninput="autoSlashTA(this); calcIMC()"></div>
       <div class="campo" style="margin:0"><label>FC (lpm)</label><input id="svFC"></div>
       <div class="campo" style="margin:0"><label>FR (rpm)</label><input id="svFR"></div>
       <div class="campo" style="margin:0"><label>Temp (°C)</label><input id="svTemp"></div>
@@ -1365,10 +1365,13 @@ async function guardarCita() {
   }
   await escribirJSON("citas.json", actuales);
   citas = actuales;
+  borrarBorrador("modalCita");
   cerrarModales();
   dibujarTodo();
   } catch (e) {
-    avisar("No se pudo guardar la cita: " + (e && e.message ? e.message : e));
+    guardarBorrador("modalCita");
+    avisar("No se pudo guardar la cita: " + (e && e.message ? e.message : e)
+      + "\n\nLo que capturaste queda respaldado en este dispositivo.");
   } finally { guardandoCita = false; marcarGuardando('btnGuardarCita', false); }
 }
 
@@ -1724,12 +1727,12 @@ async function construirPDFAviso(datos) {
   const negrita = await doc.embedFont(StandardFonts.HelveticaBold);
   const cursiva = await doc.embedFont(StandardFonts.HelveticaOblique);
 
-  const A4 = [595.28, 841.89];
-  const margen = 48, anchoUtil = A4[0] - margen * 2;
+  const CARTA = [612, 792];      // hoja carta (en México no se usa A4)
+  const margen = 48, anchoUtil = CARTA[0] - margen * 2;
   const azul = rgb(0.06, 0.17, 0.32), gris = rgb(0.33, 0.36, 0.42), negro = rgb(0.1, 0.13, 0.19);
-  let pagina = doc.addPage(A4), y = A4[1] - margen;
+  let pagina = doc.addPage(CARTA), y = CARTA[1] - margen;
 
-  const nuevaPagina = () => { pagina = doc.addPage(A4); y = A4[1] - margen; };
+  const nuevaPagina = () => { pagina = doc.addPage(CARTA); y = CARTA[1] - margen; };
   const espacio = (n) => { y -= n; if (y < margen + 40) nuevaPagina(); };
   const envolver = (texto, font, size) => {
     const palabras = String(texto).split(/\s+/); const lineas = []; let linea = "";
@@ -1766,7 +1769,7 @@ async function construirPDFAviso(datos) {
   // Bloque de consentimiento y firma
   espacio(10);
   if (y < margen + 210) nuevaPagina();
-  pagina.drawLine({ start: { x: margen, y }, end: { x: A4[0] - margen, y }, thickness: 1, color: rgb(0.86, 0.89, 0.94) });
+  pagina.drawLine({ start: { x: margen, y }, end: { x: CARTA[0] - margen, y }, thickness: 1, color: rgb(0.86, 0.89, 0.94) });
   espacio(14);
   escribir("Consentimiento expreso del paciente", { font: negrita, size: 12, color: azul, alto: 16 });
   escribir("Manifiesto que se me dio a conocer y comprendi el presente Aviso de Privacidad y que se me informo el tratamiento de mis datos personales sensibles de salud.", { size: 9.5, alto: 13 });
@@ -2051,11 +2054,14 @@ async function guardarPaciente() {
   try {
     await escribirJSON("pacientes.json", actuales);
   } catch (e) {
+    guardarBorrador("modalPaciente");
     avisar("No se pudo guardar el paciente: " + (e && e.message ? e.message : e)
-      + "\n\nRevisa la conexión con la carpeta de Datos e inténtalo de nuevo.");
+      + "\n\nRevisa la conexión con la carpeta de Datos e inténtalo de nuevo. "
+      + "Lo que capturaste queda respaldado en este dispositivo.");
     return;
   }
   pacientes = actuales;
+  borrarBorrador("modalPaciente");
   $("modalPaciente").classList.remove("visible");
   // Si se editó desde la historia, ésta sigue abierta: refrescar su encabezado.
   if ($("modalHistoria").classList.contains("visible") && pacienteEditandoId) {
@@ -2153,6 +2159,95 @@ function avisar(mensaje, titulo) {
   });
 }
 
+
+// ---------- Borradores automáticos (para no perder la captura) ----------
+// Cada vez que se escribe en un formulario se guarda una copia en el propio
+// dispositivo (localStorage). Si se cae la red, se recarga la página o se cierra
+// el navegador antes de guardar, al volver a abrir ese formulario se ofrece
+// recuperar lo capturado. El borrador se borra en cuanto el guardado tiene éxito.
+const BORRADOR = "borrador.";
+let _temporizadorBorrador = null;
+
+// Cada formulario tiene su contexto: así un borrador nunca se restaura en otro
+// paciente o en otra consulta.
+function contextoModal(id) {
+  if (id === "modalConsulta") return (historiaPacienteId || "") + "|" + (consultaEditandoId || "nueva");
+  if (id === "modalPaciente") return pacienteEditandoId || "nuevo";
+  if (id === "modalCita") return citaEditandoId || "nueva";
+  return "";
+}
+
+function camposDelModal(id) {
+  return [...document.querySelectorAll("#" + id + " input, #" + id + " select, #" + id + " textarea")]
+    .filter((e) => e.id && e.type !== "file");
+}
+
+function guardarBorrador(id) {
+  if (!["modalConsulta", "modalPaciente", "modalCita"].includes(id)) return;
+  const datos = { contexto: contextoModal(id), cuando: new Date().toISOString(), campos: {} };
+  for (const e of camposDelModal(id)) {
+    datos.campos[e.id] = e.type === "checkbox" ? e.checked : e.value;
+  }
+  // Los medicamentos viven en un arreglo, no en campos con id.
+  if (id === "modalConsulta") datos.meds = medsConsulta;
+  try { localStorage.setItem(BORRADOR + id, JSON.stringify(datos)); } catch {}
+}
+
+function borrarBorrador(id) {
+  try { localStorage.removeItem(BORRADOR + id); } catch {}
+}
+
+function leerBorrador(id) {
+  try {
+    const crudo = localStorage.getItem(BORRADOR + id);
+    if (!crudo) return null;
+    const datos = JSON.parse(crudo);
+    return datos && datos.contexto === contextoModal(id) ? datos : null;
+  } catch { return null; }
+}
+
+// ¿El borrador dice algo distinto de lo que ya se cargó en el formulario?
+function borradorAportaAlgo(id, datos) {
+  const actuales = camposDelModal(id);
+  for (const e of actuales) {
+    if (!(e.id in datos.campos)) continue;
+    const valor = e.type === "checkbox" ? e.checked : e.value;
+    if (datos.campos[e.id] !== valor) return true;
+  }
+  if (id === "modalConsulta" && JSON.stringify(datos.meds || []) !== JSON.stringify(medsConsulta)) return true;
+  return false;
+}
+
+function aplicarBorrador(id, datos) {
+  for (const e of camposDelModal(id)) {
+    if (!(e.id in datos.campos)) continue;
+    if (e.type === "checkbox") e.checked = !!datos.campos[e.id];
+    else e.value = datos.campos[e.id];
+  }
+  if (id === "modalConsulta") {
+    medsConsulta = (datos.meds || []).map((m) => ({ ...m }));
+    dibujarMeds();
+    alternarFacturaConsulta();
+    calcIMC();
+    $("svTA").dataset.taAnterior = $("svTA").value;
+  }
+  if (id === "modalPaciente") { alternarBanco(); alternarAviso(); alternarFacturacion(); }
+}
+
+// Al abrir un formulario: si quedó captura sin guardar, se ofrece recuperarla.
+async function ofrecerBorrador(id) {
+  const datos = leerBorrador(id);
+  if (!datos || !borradorAportaAlgo(id, datos)) { borrarBorrador(id); return; }
+  const cuando = new Date(datos.cuando);
+  const hora = isNaN(cuando) ? "" : cuando.toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
+  const recuperar = await confirmar(
+    "Quedó captura sin guardar de este mismo formulario" + (hora ? " (" + hora + ")" : "") + "."
+    + "\n\nPuede ser de la última vez que se cayó la conexión o se cerró la página.",
+    "Hay captura sin guardar", "Recuperar lo capturado");
+  if (recuperar) aplicarBorrador(id, datos);
+  borrarBorrador(id);
+}
+
 // ---------- Aviso de cambios sin guardar ----------
 // Un formulario se marca "sucio" solo cuando la usuaria escribe o cambia algo
 // (los valores que rellena la app al abrir el modal no cuentan).
@@ -2160,15 +2255,18 @@ const _modalesSucios = {};
 function mostrarModal(id) {
   _modalesSucios[id] = false;
   document.getElementById(id).classList.add("visible");
+  ofrecerBorrador(id);
 }
-document.addEventListener("input", (e) => {
+function _alEditar(e) {
   const m = e.target.closest && e.target.closest(".modal-fondo");
-  if (m && m.id) _modalesSucios[m.id] = true;
-}, true);
-document.addEventListener("change", (e) => {
-  const m = e.target.closest && e.target.closest(".modal-fondo");
-  if (m && m.id) _modalesSucios[m.id] = true;
-}, true);
+  if (!m || !m.id) return;
+  _modalesSucios[m.id] = true;
+  // Se guarda el borrador poco después de dejar de teclear.
+  clearTimeout(_temporizadorBorrador);
+  _temporizadorBorrador = setTimeout(() => guardarBorrador(m.id), 700);
+}
+document.addEventListener("input", _alEditar, true);
+document.addEventListener("change", _alEditar, true);
 
 function hayCambiosSinGuardar(id) {
   // La firma se dibuja en un canvas: no dispara eventos de formulario.
@@ -2185,6 +2283,7 @@ async function cerrarModalConAviso(id) {
     if (!salir) return;
   }
   _modalesSucios[id] = false;
+  borrarBorrador(id);
   document.getElementById(id).classList.remove("visible");
 }
 
@@ -2631,6 +2730,8 @@ function abrirModalConsulta(idEditar) {
     }
     medsConsulta = [];
   }
+  // El valor que se acaba de cargar es el punto de partida del auto-slash de la TA.
+  $("svTA").dataset.taAnterior = $("svTA").value;
   dibujarMeds();
   calcIMC();
   dibujarRelacionArchivos();
@@ -2682,6 +2783,21 @@ function dibujarMeds() {
     </div>`).join("");
 }
 function numDe(t) { const m = String(t||"").replace(",",".").match(/[\d.]+/); return m ? parseFloat(m[0]) : null; }
+// Inserta la "/" sola al capturar la tensión arterial: 2 dígitos si empieza en
+// 7-9 (70-99) o 3 dígitos si empieza en 1-2 (100-299). Solo al escribir: si se
+// está borrando no la vuelve a poner. Misma regla que la app de la doctora.
+function autoSlashTA(campo) {
+  const nuevo = campo.value;
+  const anterior = campo.dataset.taAnterior || "";
+  campo.dataset.taAnterior = nuevo;
+  if (nuevo.length <= anterior.length) return;          // está borrando
+  if (nuevo.includes("/") || !/^\d+$/.test(nuevo)) return;
+  const primero = nuevo[0];
+  if ("789".includes(primero) && nuevo.length === 2) campo.value = nuevo + "/";
+  else if ("12".includes(primero) && nuevo.length === 3) campo.value = nuevo + "/";
+  campo.dataset.taAnterior = campo.value;
+}
+
 function calcIMC() {
   const p = numDe($("svPeso").value); let t = numDe($("svTalla").value);
   const el = $("imcCalc");
@@ -3086,8 +3202,17 @@ async function guardarConsulta() {
       ...campos,
     });
   }
-  await escribirJSON("consultas.json", actuales);
+  try {
+    await escribirJSON("consultas.json", actuales);
+  } catch (e) {
+    guardarBorrador("modalConsulta");     // la captura queda respaldada en este dispositivo
+    avisar("No se pudo guardar la consulta: " + (e && e.message ? e.message : e)
+      + "\n\nRevisa la conexión. Lo que capturaste NO se perdió: sigue en el formulario y, "
+      + "si se cierra la página, al volver a abrir esta consulta se te ofrecerá recuperarlo.");
+    return;
+  }
   consultas = actuales;
+  borrarBorrador("modalConsulta");
   await sincronizarCitaDeConsulta(p, campos.date, editandoId);
   consultaEditandoId = null;
   $("modalConsulta").classList.remove("visible");
