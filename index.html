@@ -2856,7 +2856,16 @@ function abrirModalConsulta(idEditar) {
    "svTA","svFC","svFR","svTemp","svPeso","svTalla","svSpO2","svGlucosa"].forEach((k) => $(k).value = "");
   $("conArchivos").value = "";
   relacionArchivos = {};
-  $("conFactura").checked = false; $("conRfc").value = ""; $("conRazonSocial").value = ""; $("conDireccionFiscal").value = "";
+  // Consulta nueva: los pacientes del convenio Banco de México siempre se facturan
+  // al convenio — a BANCO DE MEXICO si es empleado activo, al FONDO COMPLEMENTARIO
+  // DE PENSIONES si es jubilado — aunque su ficha no tenga marcado "requiere factura".
+  const convenio = convenioBanco(p);
+  const facturaConsulta = !!p.wantsInvoice || !!convenio;
+  $("conFactura").checked = facturaConsulta;
+  $("conRfc").value = facturaConsulta ? (convenio ? convenio.rfc : (p.rfc || "")) : "";
+  $("conRazonSocial").value = facturaConsulta && convenio ? convenio.razon : "";
+  $("conDireccionFiscal").value = facturaConsulta
+    ? (p.taxAddressIsSame ? (p.address || "") : (p.taxAddress || "")) : "";
   if (editando) {
     $("conFactura").checked = !!editando.requiresInvoice;
     $("conRfc").value = editando.confirmedRfc || "";
@@ -2901,7 +2910,11 @@ function abrirModalConsulta(idEditar) {
       $("svTemp").value=v.temperatura||""; $("svPeso").value=v.peso||""; $("svTalla").value=v.talla||"";
       $("svSpO2").value=v.spo2||""; $("svGlucosa").value=v.glucosa||"";
     }
-    medsConsulta = [];
+    // Consulta de seguimiento: se arrastran también el motivo y los medicamentos de
+    // la consulta anterior, porque casi siempre son los mismos. Quedan editables:
+    // la doctora cambia el motivo o ajusta la receta si esta visita fue por otra cosa.
+    $("conMotivo").value = (ant && ant.reason) || "";
+    medsConsulta = ((ant && ant.prescription && ant.prescription.medications) || []).map((m) => ({ ...m }));
   }
   // El valor que se acaba de cargar es el punto de partida del auto-slash de la TA.
   $("svTA").dataset.taAnterior = $("svTA").value;
